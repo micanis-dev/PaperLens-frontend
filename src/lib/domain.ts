@@ -11,6 +11,16 @@ export const translationModes = [
 
 export type TranslationMode = (typeof translationModes)[number];
 
+export const managedModels = [
+  { id: "gpt-6-astra", label: "GPT-6 Astra", credits: "目安 30 credits" },
+  { id: "gpt-5.6-sol", label: "GPT-5.6 Sol", credits: "目安 12 credits" },
+  { id: "gpt-5.6-terra", label: "GPT-5.6 Terra", credits: "目安 6 credits" },
+  { id: "gpt-5.6-luna", label: "GPT-5.6 Luna", credits: "目安 3 credits" },
+  { id: "shisa-ai/shisa-v2.1-llama3.3-70b", label: "Shisa V2.1 70B", credits: "目安 3 credits" },
+  { id: "google/translategemma-27b-it", label: "TranslateGemma 27B", credits: "目安 3 credits" },
+  { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash", credits: "目安 6 credits" },
+] as const;
+
 export const paperDocumentSchema = z.object({
   schemaVersion: z.number().int().positive().default(1),
   id: z.string().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/, "文書IDの形式が不正です"),

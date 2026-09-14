@@ -343,6 +343,7 @@ export default component$(() => {
           documentId: id,
           sourceLanguage: "auto",
           targetLanguage: settings.targetLanguage,
+          model: settings.model,
           segments: [segment],
           preserveFormatting: true,
         };

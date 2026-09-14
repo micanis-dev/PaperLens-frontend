@@ -314,6 +314,56 @@ select {
   letter-spacing: -0.04em;
 }
 
+.llm-section-kicker {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.llm-status {
+  white-space: nowrap;
+}
+
+.llm-connection-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  border-left: 2px solid #38bdf8;
+  background: #f0f9ff;
+  padding: 0.75rem 1rem;
+  color: #0c4a6e;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+
+.llm-connection-note p {
+  margin: 0;
+}
+
+.llm-disabled-note {
+  border-left: 2px solid #fbbf24;
+  background: #fffbeb;
+  padding: 0.75rem 1rem;
+  color: #92400e;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+
+@media (max-width: 639px) {
+  .llm-translation-actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .llm-translation-actions .button {
+    flex: 1 1 8rem;
+  }
+
+  .llm-section-kicker {
+    align-items: flex-start;
+  }
+}
+
 .settings-action-bar {
   position: sticky;
   bottom: 0;
@@ -383,4 +433,414 @@ select:focus {
 }
 .accent {
   color: var(--accent-ink) !important;
+}
+
+/* LLM review workspace: source and result share a 60/40 column rhythm. */
+.llm-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 1rem 0;
+  width: 100%;
+  min-width: 0;
+  color: #1d1d1f;
+  font-family: "LINE Seed JP", ui-sans-serif, system-ui, sans-serif;
+  overflow-wrap: anywhere;
+}
+
+.llm-workspace > * {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.llm-workspace-heading,
+.llm-pane-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.llm-workspace-heading {
+  padding-block: 0.5rem 1rem;
+}
+
+.llm-workspace-heading > div {
+  flex: 1 1 18rem;
+  min-width: 0;
+}
+
+.llm-workspace-heading h1 {
+  margin: 0;
+  font-size: clamp(1.5rem, 2.4vw, 2rem);
+  line-height: 1.4;
+  letter-spacing: -0.035em;
+}
+
+.llm-workspace-heading p:not(.llm-eyebrow) {
+  margin: 0.75rem 0 0;
+  color: #626269;
+  font-size: 0.875rem;
+  line-height: 1.7;
+}
+
+.llm-workspace .llm-eyebrow {
+  margin: 0 0 0.5rem;
+  color: var(--accent-ink);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.llm-workspace .llm-status,
+.llm-result-state {
+  padding: 0.375rem 0.625rem;
+  border: 1px solid var(--line);
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: normal;
+}
+
+.llm-context {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1.5fr) minmax(0, 1fr);
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--accent);
+  background: var(--surface);
+}
+
+.llm-context > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.375rem;
+  padding: 1rem 1.25rem;
+  font-size: 0.875rem;
+}
+
+.llm-context > div + div {
+  border-left: 1px solid var(--line);
+}
+
+.llm-context label {
+  width: 100%;
+}
+
+.llm-field-label {
+  display: block;
+  color: #52525b;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.6;
+}
+
+.llm-endpoint {
+  max-width: 100%;
+  color: #52525b;
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+
+.llm-disclosure {
+  border: 1px solid var(--line);
+  background: #fff;
+  scroll-margin-top: 1rem;
+}
+
+.llm-disclosure > summary {
+  min-height: 48px;
+  padding: 0.875rem 1.25rem;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.6;
+}
+
+.llm-disclosure > summary::marker {
+  color: var(--accent-ink);
+}
+
+.llm-disclosure > summary:hover,
+.llm-disclosure[open] > summary {
+  background: var(--surface);
+}
+
+.llm-disclosure-hint {
+  margin-inline-start: 1rem;
+  color: #626269;
+  font-size: 0.8125rem;
+  font-weight: 400;
+}
+
+.llm-disclosure-body {
+  padding: 1.25rem;
+  border-top: 1px solid var(--soft-line);
+}
+
+.llm-scope-controls {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: end;
+  gap: 1rem;
+  padding-block: 0.5rem;
+}
+
+.llm-comparison {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  border: 1px solid var(--line);
+}
+
+.llm-source-pane,
+.llm-result-pane {
+  display: flex;
+  min-width: 0;
+  min-height: 30rem;
+  flex-direction: column;
+  padding: 1.25rem;
+}
+
+.llm-source-pane {
+  background: #f5f5f7;
+}
+
+.llm-result-pane {
+  border-left: 1px solid var(--line);
+  background: #fff;
+}
+
+.llm-pane-heading {
+  margin-bottom: 1.25rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.llm-pane-heading h2 {
+  margin: 0;
+  font-size: 1.125rem;
+  line-height: 1.5;
+}
+
+.llm-source-text {
+  font-size: 1rem;
+  line-height: 1.8;
+}
+
+.llm-source-text article + article {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--line);
+}
+
+.llm-source-text p {
+  margin: 0.5rem 0 0;
+  white-space: pre-wrap;
+}
+
+.llm-empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  padding: clamp(1rem, 3vw, 3rem);
+}
+
+.llm-empty-mark {
+  margin-bottom: 1.5rem;
+  border-bottom: 3px solid var(--accent);
+  color: #71717a;
+  font-size: 2rem;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.llm-empty h3 {
+  margin-bottom: 0.75rem;
+  font-size: 1rem;
+}
+
+.llm-empty p {
+  max-width: 36rem;
+  margin-bottom: 1rem;
+  color: #626269;
+  font-size: 0.875rem;
+  line-height: 1.8;
+}
+
+.llm-selection-input {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.llm-selection-input textarea,
+.llm-result-editor {
+  width: 100%;
+  min-height: 20rem;
+  flex: 1;
+  resize: vertical;
+  font-size: 1rem;
+  line-height: 1.8;
+}
+
+.llm-result-editor {
+  margin-top: 0.75rem;
+  padding: 1rem;
+  border-color: var(--line);
+}
+
+.llm-workspace > .llm-action-area {
+  grid-column: 2;
+  padding: 1.25rem;
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--accent);
+  background: #fff;
+}
+
+.llm-action-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 1.5rem;
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+.llm-action-summary > div {
+  min-width: 0;
+  flex: 1 1 10rem;
+}
+
+.llm-send-note,
+.llm-feedback {
+  margin: 1rem 0 0;
+  color: #52525b;
+  font-size: 0.8125rem;
+  line-height: 1.8;
+}
+
+.llm-feedback {
+  padding: 0.75rem;
+  border-left: 2px solid var(--accent);
+  background: #f0f9ff;
+  color: #0c4a6e;
+}
+
+.llm-workspace .llm-translation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.625rem;
+  margin-top: 1rem;
+}
+
+.llm-workspace .llm-translation-actions .button {
+  flex: 1 1 10rem;
+}
+
+.llm-tags {
+  margin-top: 0.5rem;
+  border-color: var(--soft-line);
+}
+
+.llm-tags .llm-disclosure-body > label {
+  margin-top: 1rem;
+}
+
+.llm-workspace :is(input, select, textarea, button) {
+  min-width: 0;
+  max-width: 100%;
+  border-radius: 0;
+}
+
+.llm-workspace :is(input:not([type="checkbox"]), select, .button) {
+  min-height: 44px;
+}
+
+.llm-workspace :is(input:not([type="checkbox"]), select, textarea) {
+  font-size: 1rem;
+}
+
+.llm-workspace .button {
+  white-space: normal;
+  text-align: center;
+  line-height: 1.5;
+}
+
+.llm-context a,
+.llm-empty a {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+}
+
+.llm-tags label:has(input[type="checkbox"]) {
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.llm-workspace :is(a, button, input, select, textarea, summary):focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 3px;
+}
+
+@media (max-width: 1199px) {
+  .llm-scope-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 767px) {
+  .llm-workspace,
+  .llm-context,
+  .llm-comparison {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .llm-workspace > .llm-action-area {
+    grid-column: 1;
+  }
+
+  .llm-context > div + div {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .llm-source-pane,
+  .llm-result-pane {
+    min-height: 0;
+    padding: 1rem;
+  }
+
+  .llm-result-pane {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .llm-empty {
+    padding: 1rem 0;
+  }
+
+  .llm-disclosure-hint {
+    display: block;
+    margin: 0.375rem 0 0;
+  }
+
+  .llm-disclosure-body,
+  .llm-context > div,
+  .llm-workspace > .llm-action-area {
+    padding: 1rem;
+  }
+
+  .llm-tags .llm-disclosure-body > div:first-child {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 479px) {
+  .llm-scope-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

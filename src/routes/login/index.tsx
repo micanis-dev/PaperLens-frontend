@@ -1,7 +1,19 @@
-import { component$, $, useSignal, useVisibleTask$ } from "@builder.io/qwik";
-import { Link, type DocumentHead } from "@builder.io/qwik-city";
+import {
+  component$,
+  $,
+  isDev,
+  useSignal,
+  useVisibleTask$,
+} from "@builder.io/qwik";
+import { Link, type DocumentHead, useNavigate } from "@builder.io/qwik-city";
 import { Icon } from "~/components/icon";
-import { apiBaseURL, requestMagicLink } from "~/lib/api";
+import {
+  apiBaseURL,
+  getDevTestUsers,
+  loginAsDevTestUser,
+  loginPassword,
+  type DevTestUser,
+} from "~/lib/api";
 import { getSetting } from "~/lib/storage";
 import { localize, type Locale } from "~/lib/i18n";
 
@@ -17,14 +29,14 @@ export default component$(() => {
     document.documentElement.lang = locale.value;
   });
   const email = useSignal("");
+  const password = useSignal("");
   const busy = useSignal(false);
-  const message = useSignal("");
   const error = useSignal("");
-  const devLink = useSignal("");
+  const testUsers = useSignal<DevTestUser[]>([]);
+  const testUserBusy = useSignal("");
+  const navigate = useNavigate();
   const send = $(async () => {
-    message.value = "";
     error.value = "";
-    devLink.value = "";
     const normalizedEmail = email.value.trim();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
       error.value = localize(
@@ -36,25 +48,42 @@ export default component$(() => {
     }
     busy.value = true;
     try {
-      const result = await requestMagicLink(normalizedEmail);
-      message.value = localize(
-        locale.value,
-        "ログインリンクを送信しました",
-        "Login link sent",
-      );
-      if (result.devToken)
-        devLink.value = `${apiBaseURL}/v1/auth/magic-link/verify?token=${encodeURIComponent(result.devToken)}`;
+      await loginPassword(normalizedEmail, password.value);
+      window.location.assign("/");
     } catch (caught) {
       error.value =
         caught instanceof Error
           ? caught.message
           : localize(
               locale.value,
-              "ログインリンクを送信できませんでした",
-              "Could not send the login link",
+              "ログインできませんでした",
+              "Could not log in",
             );
     } finally {
       busy.value = false;
+    }
+  });
+  const loginAsTestUser = $(async (user: DevTestUser) => {
+    testUserBusy.value = user.id;
+    error.value = "";
+    try {
+      await loginAsDevTestUser(user.id);
+      await navigate("/");
+    } catch (caught) {
+      error.value =
+        caught instanceof Error
+          ? caught.message
+          : "Could not log in as the test user";
+    } finally {
+      testUserBusy.value = "";
+    }
+  });
+  useVisibleTask$(async () => {
+    if (!isDev) return;
+    try {
+      testUsers.value = (await getDevTestUsers()).users;
+    } catch {
+      testUsers.value = [];
     }
   });
   return (
@@ -75,19 +104,7 @@ export default component$(() => {
             )}
           </h1>
         </div>
-        <a
-          class="button mt-7 flex w-full"
-          href={`${apiBaseURL}/v1/auth/google`}
-        >
-          <Icon name="Globe" size={16} />
-          {localize(locale.value, "Googleでログイン", "Log in with Google")}
-        </a>
-        <div class="my-7 flex items-center gap-3 text-xs text-slate-400">
-          <span class="h-px flex-1 bg-slate-200" />
-          {localize(locale.value, "または", "or")}
-          <span class="h-px flex-1 bg-slate-200" />
-        </div>
-        <form preventdefault:submit onSubmit$={send}>
+        <form preventdefault:submit onSubmit$={send} class="mt-7">
           <label>
             {localize(locale.value, "メールアドレス", "Email address")}
             <input
@@ -97,7 +114,6 @@ export default component$(() => {
               required
               value={email.value}
               aria-invalid={error.value ? "true" : undefined}
-              aria-describedby={error.value ? "email-error" : undefined}
               onInput$={(_, el) => {
                 email.value = el.value;
                 error.value = "";
@@ -105,20 +121,54 @@ export default component$(() => {
               placeholder="you@example.com"
             />
           </label>
+          <label class="mt-4 block">
+            {localize(locale.value, "パスワード", "Password")}
+            <input
+              class="mt-2 w-full"
+              type="password"
+              autoComplete="current-password"
+              required
+              value={password.value}
+              onInput$={(_, el) => {
+                password.value = el.value;
+                error.value = "";
+              }}
+            />
+          </label>
           <button
             type="submit"
-            class="button primary mt-4 w-full"
-            disabled={busy.value || !email.value.trim()}
+            class="button primary mt-5 w-full"
+            disabled={busy.value || !email.value.trim() || !password.value}
           >
             {busy.value
-              ? localize(locale.value, "送信中…", "Sending…")
+              ? localize(locale.value, "ログイン中…", "Logging in…")
               : localize(
                   locale.value,
-                  "マジックリンクを送る",
-                  "Send magic link",
+                  "メールアドレスでログイン",
+                  "Log in with email",
                 )}
           </button>
         </form>
+        <div class="my-6 flex items-center gap-3 text-xs text-slate-400">
+          <span class="h-px flex-1 bg-slate-200" />
+          {localize(locale.value, "またはSSO", "or continue with SSO")}
+          <span class="h-px flex-1 bg-slate-200" />
+        </div>
+        <div class="grid gap-2 sm:grid-cols-3">
+          {(["apple", "google", "github"] as const).map((provider) => (
+            <a
+              key={provider}
+              class="button subtle text-xs"
+              href={`${apiBaseURL}/v1/auth/${provider}`}
+            >
+              {provider === "apple"
+                ? "Apple"
+                : provider === "google"
+                  ? "Google"
+                  : "GitHub"}
+            </a>
+          ))}
+        </div>
         {error.value && (
           <p
             id="email-error"
@@ -128,26 +178,36 @@ export default component$(() => {
             {error.value}
           </p>
         )}
-        {message.value && (
-          <p
-            class="mt-5 border-l-2 border-sky-400 bg-sky-50 p-3 text-sm leading-6 text-sky-900"
-            role="status"
-          >
-            {message.value}
-          </p>
+        {isDev && testUsers.value.length > 0 && (
+          <aside class="mt-7 border-t border-dashed border-amber-300 pt-5">
+            <p class="text-xs font-bold uppercase tracking-[0.12em] text-amber-700">
+              {localize(
+                locale.value,
+                "開発用テストユーザー",
+                "Development test users",
+              )}
+            </p>
+            <div class="mt-3 grid grid-cols-2 gap-2">
+              {testUsers.value.map((user) => (
+                <button
+                  key={user.id}
+                  type="button"
+                  class="button subtle text-xs"
+                  disabled={Boolean(testUserBusy.value)}
+                  onClick$={() => loginAsTestUser(user)}
+                >
+                  {testUserBusy.value === user.id ? "…" : user.label}
+                </button>
+              ))}
+            </div>
+          </aside>
         )}
-        {devLink.value && (
-          <a
-            class="mt-3 block break-all text-xs text-sky-700 underline"
-            href={devLink.value}
-          >
-            {localize(
-              locale.value,
-              "開発用ログインリンクを開く",
-              "Open development login link",
-            )}
-          </a>
-        )}
+        <Link
+          href="/register/"
+          class="mt-5 block text-center text-sm text-sky-700 hover:text-sky-950"
+        >
+          {localize(locale.value, "新規登録はこちら", "Create a new account")}
+        </Link>
         <Link
           href="/"
           class="mt-7 block text-center text-sm text-slate-500 hover:text-slate-950"

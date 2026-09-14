@@ -21,10 +21,14 @@ import { exportBackupZip, importBackupZip } from "~/lib/backup";
 import { paperDocumentSchema } from "~/lib/domain";
 import {
   cancelAccountDeletion,
+  apiBaseURL,
   getAccount,
+  getLinkedIdentities,
   logoutManagedSession,
   requestAccountDeletion,
+  unlinkIdentity,
   type AccountDeletion,
+  type LinkedIdentity,
 } from "~/lib/api";
 import { localize, useLocale } from "~/lib/i18n";
 
@@ -46,6 +50,8 @@ export default component$(() => {
   const deletion = useSignal<AccountDeletion>();
   const accountState = useSignal<"unknown" | "signed-out" | "ready">("unknown");
   const deletionBusy = useSignal(false);
+  const linkedIdentities = useSignal<LinkedIdentity[]>([]);
+  const identityBusy = useSignal("");
   useVisibleTask$(async () => {
     try {
       language.value = await getSetting("uiLanguage", "ja");
@@ -74,8 +80,27 @@ export default component$(() => {
       const response = await getAccount();
       deletion.value = response.deletion;
       accountState.value = "ready";
+      linkedIdentities.value = (await getLinkedIdentities()).identities;
     } catch {
       accountState.value = "signed-out";
+    }
+  });
+  const unlinkSSO = $(async (provider: LinkedIdentity["provider"]) => {
+    if (!window.confirm(`${provider}のSSO連携を解除しますか？`)) return;
+    identityBusy.value = provider;
+    try {
+      await unlinkIdentity(provider);
+      linkedIdentities.value = linkedIdentities.value.filter(
+        (item) => item.provider !== provider,
+      );
+      authMessage.value = `${provider}のSSO連携を解除しました。`;
+    } catch (error) {
+      authMessage.value =
+        error instanceof Error
+          ? error.message
+          : "SSO連携を解除できませんでした";
+    } finally {
+      identityBusy.value = "";
     }
   });
   const save = $(async () => {
@@ -334,6 +359,45 @@ export default component$(() => {
             </span>
           )}
         </section>
+        {accountState.value === "ready" && (
+          <section class="border border-slate-200 bg-white p-6">
+            <h2 class="font-bold">{t("ログイン方法", "Sign-in methods")}</h2>
+            <p class="mt-2 text-sm leading-6 text-slate-500">
+              {t(
+                "メールアドレス・パスワードを基本に、SSOを追加・解除できます。SSO連携には同じメールアドレスの確認が必要です。",
+                "Use email and password as the primary method, and add or remove SSO providers. SSO linking requires the same verified email address.",
+              )}
+            </p>
+            <div class="mt-5 grid gap-3 sm:grid-cols-3">
+              {(["apple", "google", "github"] as const).map((provider) => {
+                const linked = linkedIdentities.value.some(
+                  (item) => item.provider === provider,
+                );
+                return linked ? (
+                  <button
+                    key={provider}
+                    type="button"
+                    class="button"
+                    disabled={identityBusy.value === provider}
+                    onClick$={() => unlinkSSO(provider)}
+                  >
+                    {identityBusy.value === provider
+                      ? "…"
+                      : `${provider} · ${t("解除", "Unlink")}`}
+                  </button>
+                ) : (
+                  <a
+                    key={provider}
+                    class="button subtle text-center"
+                    href={`${apiBaseURL}/v1/auth/link/${provider}`}
+                  >
+                    {provider} · {t("連携", "Link")}
+                  </a>
+                );
+              })}
+            </div>
+          </section>
+        )}
         {accountState.value === "ready" && (
           <section class="border border-red-200 bg-white p-6">
             <h2 class="font-bold text-red-800">

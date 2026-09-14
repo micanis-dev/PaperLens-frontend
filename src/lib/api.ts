@@ -18,6 +18,7 @@ export type TranslationRequest = {
   documentId: string;
   sourceLanguage: string | "auto";
   targetLanguage: string;
+  model?: string;
   segments: TranslationSegment[];
   glossary?: { source: string; translation: string }[];
   preserveFormatting: boolean;
@@ -90,7 +91,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export function estimateTranslation(payload: TranslationRequest) {
-  return request<{ requestId: string; estimate: { inputTokens: number; estimatedOutputTokens: number; estimatedCredits: number } }>(
+  return request<{ requestId: string; estimate: { model: string; inputTokens: number; estimatedOutputTokens: number; estimatedCredits: number } }>(
     "/v1/translations/estimate",
     { method: "POST", body: JSON.stringify(payload) },
   );
@@ -188,8 +189,36 @@ export function logoutManagedSession() {
   return request<{ requestId: string; loggedOut: boolean }>("/v1/auth/logout", { method: "POST" });
 }
 
+export function registerPassword(email: string, password: string) {
+  return request<{ requestId: string; registered: boolean }>("/v1/auth/register", { method: "POST", body: JSON.stringify({ email, password }) });
+}
+
+export function loginPassword(email: string, password: string) {
+  return request<{ requestId: string; loggedIn: boolean }>("/v1/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
+}
+
+export type LinkedIdentity = { provider: "apple" | "google" | "github" };
+
+export function getLinkedIdentities() {
+  return request<{ requestId: string; identities: LinkedIdentity[] }>("/v1/auth/identities");
+}
+
+export function unlinkIdentity(provider: LinkedIdentity["provider"]) {
+  return request<{ requestId: string; unlinked: boolean }>(`/v1/auth/identities/${encodeURIComponent(provider)}`, { method: "DELETE", body: "{}" });
+}
+
 export function requestMagicLink(email: string) {
   return request<{ requestId: string; sent: boolean; devToken?: string }>("/v1/auth/magic-link", { method: "POST", body: JSON.stringify({ email }) });
+}
+
+export type DevTestUser = { id: string; label: string };
+
+export function getDevTestUsers() {
+  return request<{ requestId: string; users: DevTestUser[] }>("/v1/auth/test-users");
+}
+
+export function loginAsDevTestUser(userID: string) {
+  return request<{ requestId: string; user: DevTestUser }>(`/v1/auth/test-users/${encodeURIComponent(userID)}`, { method: "POST", body: "{}" });
 }
 
 export async function streamManagedTranslation(

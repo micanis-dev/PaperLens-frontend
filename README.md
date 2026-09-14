@@ -26,6 +26,8 @@ pnpm run build.static
 
 `build.static`はブラウザ内で完結するライブラリ・リーダーを静的ファイルとして出力します。`public/_redirects`で、ビルド時に存在しないローカル論文IDのパスもアプリシェルへフォールバックします。Go APIは別途`backend`のFly.ioデプロイで公開し、公開時だけ`VITE_API_BASE_URL=https://api.paperlens.micanis.dev`を指定します。
 
+`/register/`ではメールアドレス＋12文字以上のパスワード、またはApple・Google・GitHub SSOで新規登録できます。`/login/`もメール＋パスワードを既定にし、3つのSSOボタンを提供します。ログイン後の設定画面では、同じメールアドレスを確認したSSOだけを明示的に連携・解除できます。開発モードの`/login/`には、SSOアカウントを用意しなくても切り替えられる4人のテストユーザーが表示されます。
+
 ## 構成
 
 - `src/routes/` — ライブラリ、PDFリーダー、追加、設定のルート
