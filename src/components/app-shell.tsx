@@ -112,7 +112,7 @@ const OpenTabs = component$(() => {
           <button
             type="button"
             aria-label={`${tab.title} ${message(locale.value, "close")}`}
-            class="px-2 text-slate-400 hover:text-slate-950"
+            class="flex size-8 items-center justify-center text-slate-400 hover:text-slate-950"
             onClick$={() => close(tab.id)}
           >
             <Icon name="X" size={13} />
@@ -245,12 +245,33 @@ const navigation = (locale: Locale) => [
   },
 ];
 
+const sectionTitle = (pathname: string, locale: Locale) => {
+  if (pathname.startsWith("/upload")) return message(locale, "addPaper");
+  if (pathname.startsWith("/llm")) return message(locale, "llmOperations");
+  if (pathname.startsWith("/billing")) return message(locale, "billing");
+  if (pathname.startsWith("/settings")) return message(locale, "settings");
+  if (pathname.startsWith("/papers")) return message(locale, "reading");
+  return message(locale, "library");
+};
+
 export const AppShell = component$(() => {
   const mobileOpen = useSignal(false);
   const locale = useLocale();
   const location = useLocation();
   const isReader = location.url.pathname.startsWith("/papers/");
   const items = navigation(locale.value);
+  const currentTitle = sectionTitle(location.url.pathname, locale.value);
+  const isActive = (href: string) => {
+    if (href === "/")
+      return location.url.pathname === "/" && !location.url.search;
+    if (href.includes("?")) {
+      const [path, query] = href.split("?");
+      return (
+        location.url.pathname === path && location.url.search === `?${query}`
+      );
+    }
+    return location.url.pathname.startsWith(href);
+  };
   return (
     <div class="min-h-screen bg-white text-slate-950">
       <QuickSwitcher />
@@ -289,6 +310,14 @@ export const AppShell = component$(() => {
             <Icon name="X" size={18} />
           </button>
         </div>
+        <Link
+          href="/upload/"
+          class="button primary mb-8 w-full"
+          onClick$={() => (mobileOpen.value = false)}
+        >
+          <Icon name="Plus" size={17} />
+          {message(locale.value, "addPaper")}
+        </Link>
         <nav
           aria-label={
             locale.value === "en" ? "Main navigation" : "メインナビゲーション"
@@ -302,7 +331,13 @@ export const AppShell = component$(() => {
               <Link
                 key={item.href}
                 href={item.href}
-                class="flex items-center gap-3 border-l-2 border-transparent px-3 py-2.5 text-sm font-medium text-slate-500 hover:border-sky-400 hover:bg-slate-100 hover:text-slate-950"
+                class={cn(
+                  "flex items-center gap-3 border-l-2 px-3 py-2.5 text-sm font-medium transition-colors hover:border-sky-400 hover:bg-slate-100 hover:text-slate-950",
+                  isActive(item.href)
+                    ? "border-sky-400 bg-sky-50 text-slate-950"
+                    : "border-transparent text-slate-500",
+                )}
+                aria-current={isActive(item.href) ? "page" : undefined}
                 onClick$={() => (mobileOpen.value = false)}
               >
                 <Icon name={item.icon} size={18} />
@@ -315,7 +350,13 @@ export const AppShell = component$(() => {
           </p>
           <Link
             href="/settings/"
-            class="flex items-center gap-3 border-l-2 border-transparent px-3 py-2.5 text-sm font-medium text-slate-500 hover:border-sky-400 hover:bg-slate-100 hover:text-slate-950"
+            class={cn(
+              "flex items-center gap-3 border-l-2 px-3 py-2.5 text-sm font-medium transition-colors hover:border-sky-400 hover:bg-slate-100 hover:text-slate-950",
+              isActive("/settings/")
+                ? "border-sky-400 bg-sky-50 text-slate-950"
+                : "border-transparent text-slate-500",
+            )}
+            aria-current={isActive("/settings/") ? "page" : undefined}
             onClick$={() => (mobileOpen.value = false)}
           >
             <Icon name="Settings2" size={18} />
@@ -324,20 +365,32 @@ export const AppShell = component$(() => {
         </nav>
       </aside>
       <div class="lg:pl-60">
-        <header class="sticky top-0 z-20 flex h-14 items-center border-b border-slate-200 bg-white/95 px-5 backdrop-blur lg:hidden">
+        <header class="sticky top-0 z-20 flex h-14 items-center border-b border-slate-200 bg-white/95 px-4 backdrop-blur lg:hidden">
           <button
             type="button"
-            class="p-2 text-slate-500 lg:hidden"
+            class="flex size-10 items-center justify-center text-slate-500 lg:hidden"
             aria-label={locale.value === "en" ? "Open menu" : "メニューを開く"}
             onClick$={() => (mobileOpen.value = true)}
           >
             <Icon name="Menu" size={20} />
           </button>
+          <span class="ml-2 text-sm font-semibold text-slate-950">
+            {currentTitle}
+          </span>
+          {!isReader && (
+            <Link
+              href="/upload/"
+              class="ml-auto flex size-10 items-center justify-center text-slate-600"
+              aria-label={message(locale.value, "addPaper")}
+            >
+              <Icon name="Plus" size={20} />
+            </Link>
+          )}
         </header>
         <OpenTabs />
         <main
           class={cn(
-            "w-full",
+            "app-main w-full",
             isReader ? "px-3 py-4 sm:px-5" : "px-5 py-8 sm:px-8 sm:py-10",
           )}
         >

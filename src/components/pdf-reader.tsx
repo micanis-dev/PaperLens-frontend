@@ -86,11 +86,7 @@ export const PdfReader = component$<Props>(
       >();
 
     const renderPage = $(
-      async (
-        pageNumber: number,
-        target: HTMLElement,
-        scale?: number,
-      ) => {
+      async (pageNumber: number, target: HTMLElement, scale?: number) => {
         if (!pdf.value) return;
         // Qwik serializes `$()` functions for lazy execution. Values referenced
         // only from a default parameter are not captured, so resolving the
@@ -725,7 +721,7 @@ export const PdfReader = component$<Props>(
                   />
                   <input
                     ref={searchInput}
-                    class="w-full py-1 pl-8 text-xs"
+                    class="pdf-search-input w-full py-1 pl-8 text-xs"
                     placeholder={localize(
                       locale.value,
                       "PDF内検索",

@@ -149,10 +149,12 @@ export default component$(() => {
     );
   return (
     <AppShell>
-      <section class="mx-auto max-w-5xl space-y-8">
-        <h1 class="text-3xl font-bold tracking-[-0.04em]">
-          {localize(locale.value, "プランと課金", "Plans & billing")}
-        </h1>
+      <section class="app-page max-w-5xl space-y-8">
+        <div class="page-heading">
+          <h1 class="text-3xl font-bold tracking-[-0.04em]">
+            {localize(locale.value, "プランと課金", "Plans & billing")}
+          </h1>
+        </div>
         {message.value && (
           <p
             class="border-l-2 border-sky-400 bg-sky-50 p-4 text-sm text-sky-900"

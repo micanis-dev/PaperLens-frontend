@@ -688,11 +688,13 @@ export default component$(() => {
   });
   return (
     <AppShell>
-      <section class="mx-auto max-w-5xl space-y-8">
-        <h1 class="text-3xl font-bold tracking-[-0.04em]">
-          {t("LLM操作", "LLM workspace")}
-        </h1>
-        <section class="border border-slate-200 bg-white p-6">
+      <section class="app-page max-w-5xl space-y-8">
+        <div class="page-heading">
+          <h1 class="text-3xl font-bold tracking-[-0.04em]">
+            {t("LLM操作", "LLM workspace")}
+          </h1>
+        </div>
+        <section class="form-layout border border-slate-200 bg-white p-6">
           <div class="flex flex-wrap items-start justify-between gap-4">
             <h2 class="font-bold">{t("接続状態", "Connection status")}</h2>
             <span
@@ -854,7 +856,7 @@ export default component$(() => {
               "Generation is available after connecting.",
             )}
         </p>
-        <section class="border border-slate-200 bg-white p-6">
+        <section class="form-layout border border-slate-200 bg-white p-6">
           <div class="grid gap-4 sm:grid-cols-2">
             <label>
               {t("対象論文", "Paper")}

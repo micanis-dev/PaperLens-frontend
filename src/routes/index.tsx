@@ -173,6 +173,22 @@ export default component$(() => {
             : (b.updatedAt || "").localeCompare(a.updatedAt || ""),
     );
   const tags = [...new Set(papers.value.flatMap((paper) => paper.tags))].sort();
+  const hasFilters = Boolean(
+    query.value.trim() ||
+      status.value ||
+      favoriteOnly.value ||
+      selectedTag.value ||
+      rating.value ||
+      dateFilter.value,
+  );
+  const clearFilters = $(() => {
+    query.value = "";
+    status.value = "";
+    favoriteOnly.value = false;
+    selectedTag.value = "";
+    rating.value = "";
+    dateFilter.value = "";
+  });
   const exportMetadata = $(async () => {
     const payload = {
       schemaVersion: 1,
@@ -192,8 +208,8 @@ export default component$(() => {
   });
   return (
     <AppShell>
-      <section class="space-y-8">
-        <div class="flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
+      <section class="app-page space-y-8">
+        <div class="page-heading">
           <div>
             <h1 class="text-3xl font-bold tracking-[-0.04em] sm:text-4xl">
               {message(locale.value, "libraryTitle")}
@@ -226,7 +242,7 @@ export default component$(() => {
             </div>
           ))}
         </div>
-        <div class="flex flex-col gap-3 border-b border-slate-200 pb-4 lg:flex-row lg:items-center">
+        <div class="border-b border-slate-200 pb-4">
           <label class="relative block w-full lg:max-w-xl">
             <span class="sr-only">
               {message(locale.value, "searchLibrary")}
@@ -237,100 +253,127 @@ export default component$(() => {
               class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
             />
             <input
-              class="h-11 w-full pl-10 pr-16 text-sm"
+              class="library-search-input h-11 w-full pl-10 pr-16 text-sm"
               placeholder={message(locale.value, "searchLibrary")}
               value={query.value}
               onInput$={(_, target) => (query.value = target.value)}
+              onKeyDown$={(event) => {
+                if (event.key === "Escape") query.value = "";
+              }}
             />
-            <span class="absolute right-3 top-1/2 -translate-y-1/2 border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-400">
-              ⌘K
+            <span
+              class="absolute right-3 top-1/2 -translate-y-1/2 border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-400"
+              aria-hidden="true"
+            >
+              Esc
             </span>
           </label>
-          <select
-            aria-label={message(locale.value, "allStatuses")}
-            class="h-11"
-            value={status.value}
-            onChange$={(_, el) =>
-              (status.value = el.value as typeof status.value)
-            }
-          >
-            <option value="">{message(locale.value, "allStatuses")}</option>
-            {Object.entries(statusLabels).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
+          <div class="mt-3 flex gap-2 overflow-x-auto pb-1 lg:items-center">
+            <select
+              aria-label={message(locale.value, "allStatuses")}
+              class="h-11 min-w-36 shrink-0"
+              value={status.value}
+              onChange$={(_, el) =>
+                (status.value = el.value as typeof status.value)
+              }
+            >
+              <option value="">{message(locale.value, "allStatuses")}</option>
+              {Object.entries(statusLabels).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label={message(locale.value, "allTags")}
+              class="h-11 min-w-32 shrink-0"
+              value={selectedTag.value}
+              onChange$={(_, el) => (selectedTag.value = el.value)}
+            >
+              <option value="">{message(locale.value, "allTags")}</option>
+              {tags.map((tag) => (
+                <option key={tag} value={tag}>{`#${tag}`}</option>
+              ))}
+            </select>
+            <select
+              aria-label={message(locale.value, "allRatings")}
+              class="h-11 min-w-32 shrink-0"
+              value={rating.value}
+              onChange$={(_, el) =>
+                (rating.value = el.value as typeof rating.value)
+              }
+            >
+              <option value="">{message(locale.value, "allRatings")}</option>
+              <option value="5">5 stars</option>
+              <option value="4">4+ stars</option>
+              <option value="3">3+ stars</option>
+              <option value="2">2+ stars</option>
+              <option value="1">1+ star</option>
+            </select>
+            <select
+              aria-label={message(locale.value, "allDates")}
+              class="h-11 min-w-32 shrink-0"
+              value={dateFilter.value}
+              onChange$={(_, el) =>
+                (dateFilter.value = el.value as typeof dateFilter.value)
+              }
+            >
+              <option value="">{message(locale.value, "allDates")}</option>
+              <option value="7">Last 7 days</option>
+              <option value="30">Last 30 days</option>
+              <option value="365">Last year</option>
+            </select>
+            <button
+              type="button"
+              class={`button shrink-0 ${favoriteOnly.value ? "primary" : ""}`}
+              onClick$={() => (favoriteOnly.value = !favoriteOnly.value)}
+            >
+              <Icon name="Heart" size={16} />
+              {message(locale.value, "favoritesOnly")}
+            </button>
+            <select
+              aria-label={locale.value === "en" ? "Sort" : "並び替え"}
+              class="h-11 min-w-32 shrink-0 lg:ml-auto"
+              value={sort.value}
+              onChange$={(_, el) =>
+                (sort.value = el.value as typeof sort.value)
+              }
+            >
+              <option value="recent">{message(locale.value, "recent")}</option>
+              <option value="updated">
+                {message(locale.value, "updated")}
               </option>
-            ))}
-          </select>
-          <select
-            aria-label={message(locale.value, "allTags")}
-            class="h-11"
-            value={selectedTag.value}
-            onChange$={(_, el) => (selectedTag.value = el.value)}
-          >
-            <option value="">{message(locale.value, "allTags")}</option>
-            {tags.map((tag) => (
-              <option key={tag} value={tag}>{`#${tag}`}</option>
-            ))}
-          </select>
-          <select
-            aria-label={message(locale.value, "allRatings")}
-            class="h-11"
-            value={rating.value}
-            onChange$={(_, el) =>
-              (rating.value = el.value as typeof rating.value)
-            }
-          >
-            <option value="">{message(locale.value, "allRatings")}</option>
-            <option value="5">5 stars</option>
-            <option value="4">4+ stars</option>
-            <option value="3">3+ stars</option>
-            <option value="2">2+ stars</option>
-            <option value="1">1+ star</option>
-          </select>
-          <select
-            aria-label={message(locale.value, "allDates")}
-            class="h-11"
-            value={dateFilter.value}
-            onChange$={(_, el) =>
-              (dateFilter.value = el.value as typeof dateFilter.value)
-            }
-          >
-            <option value="">{message(locale.value, "allDates")}</option>
-            <option value="7">Last 7 days</option>
-            <option value="30">Last 30 days</option>
-            <option value="365">Last year</option>
-          </select>
-          <button
-            type="button"
-            class={favoriteOnly.value ? "button primary" : "button"}
-            onClick$={() => (favoriteOnly.value = !favoriteOnly.value)}
-          >
-            <Icon name="Heart" size={16} />
-            {message(locale.value, "favoritesOnly")}
-          </button>
-          <select
-            aria-label={locale.value === "en" ? "Sort" : "並び替え"}
-            class="h-11 lg:ml-auto"
-            value={sort.value}
-            onChange$={(_, el) => (sort.value = el.value as typeof sort.value)}
-          >
-            <option value="recent">{message(locale.value, "recent")}</option>
-            <option value="updated">{message(locale.value, "updated")}</option>
-            <option value="rating">
-              {message(locale.value, "ratingOrder")}
-            </option>
-            <option value="title">{message(locale.value, "titleOrder")}</option>
-          </select>
+              <option value="rating">
+                {message(locale.value, "ratingOrder")}
+              </option>
+              <option value="title">
+                {message(locale.value, "titleOrder")}
+              </option>
+            </select>
+            {hasFilters && (
+              <button
+                type="button"
+                class="button subtle shrink-0"
+                onClick$={clearFilters}
+              >
+                {message(locale.value, "clearFilters")}
+              </button>
+            )}
+          </div>
         </div>
-        <div class="flex items-center justify-between text-sm text-slate-500">
-          <span>
+        <div class="flex items-center justify-between gap-3 text-sm text-slate-500">
+          <span aria-live="polite" role="status">
             {loading.value
               ? locale.value === "en"
                 ? "Loading…"
                 : "読み込み中…"
               : `${visiblePapers.length} ${locale.value === "en" ? "papers" : "件"}`}
           </span>
-          <button type="button" class="button subtle" onClick$={exportMetadata}>
+          <button
+            type="button"
+            class="button subtle shrink-0"
+            onClick$={exportMetadata}
+          >
             <Icon name="Download" size={16} />
             {locale.value === "en"
               ? "Back up metadata"
@@ -431,6 +474,7 @@ export default component$(() => {
                       <button
                         key={index}
                         type="button"
+                        class="flex size-8 items-center justify-center"
                         aria-label={
                           locale.value === "en"
                             ? `${index + 1} stars`
@@ -470,7 +514,7 @@ export default component$(() => {
                           ? "Toggle favorite"
                           : "お気に入りを切り替え"
                       }
-                      class={paper.favorite ? "text-sky-500" : "text-slate-300"}
+                      class={`flex size-8 items-center justify-center ${paper.favorite ? "text-sky-500" : "text-slate-300"}`}
                       onClick$={() =>
                         updatePaper(paper, { favorite: !paper.favorite })
                       }

@@ -244,11 +244,13 @@ export default component$(() => {
   });
   return (
     <AppShell>
-      <section class="mx-auto max-w-4xl space-y-8">
-        <h1 class="text-3xl font-bold tracking-[-0.04em]">
-          {t("設定", "Settings")}
-        </h1>
-        <section class="border border-slate-200 bg-white p-6">
+      <section class="app-page max-w-4xl space-y-8">
+        <div class="page-heading">
+          <h1 class="text-3xl font-bold tracking-[-0.04em]">
+            {t("設定", "Settings")}
+          </h1>
+        </div>
+        <section class="form-layout border border-slate-200 bg-white p-6">
           <h2 class="font-bold">{t("表示", "Display")}</h2>
           <div class="mt-5 grid gap-5 sm:grid-cols-2">
             <label>
@@ -318,9 +320,19 @@ export default component$(() => {
               </p>
             )}
           </div>
-          <button type="button" class="button" onClick$={logout}>
-            {t("ログアウト", "Log out")}
-          </button>
+          {accountState.value === "ready" ? (
+            <button type="button" class="button" onClick$={logout}>
+              {t("ログアウト", "Log out")}
+            </button>
+          ) : accountState.value === "signed-out" ? (
+            <Link href="/login/" class="button primary">
+              {t("ログイン", "Log in")}
+            </Link>
+          ) : (
+            <span class="text-sm text-slate-400" role="status">
+              {t("確認中…", "Checking…")}
+            </span>
+          )}
         </section>
         {accountState.value === "ready" && (
           <section class="border border-red-200 bg-white p-6">
@@ -435,7 +447,7 @@ export default component$(() => {
             </button>
           </div>
         </section>
-        <div class="flex items-center justify-end gap-4">
+        <div class="settings-action-bar flex items-center justify-end gap-4">
           <span class="text-sm text-emerald-700" role="status">
             {message.value}
           </span>

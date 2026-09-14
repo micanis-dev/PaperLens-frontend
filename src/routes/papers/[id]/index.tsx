@@ -127,6 +127,8 @@ export default component$(() => {
   );
 
   useVisibleTask$(async () => {
+    if (window.matchMedia("(max-width: 639px)").matches)
+      showThumbnails.value = false;
     try {
       const [loaded, loadedFile] = await Promise.all([
         getPaper(id),
@@ -503,10 +505,10 @@ export default component$(() => {
   const viewerPaper = paper.value;
   const viewerLayoutClass =
     layout.value === "split"
-      ? "grid grid-cols-[minmax(0,1fr)_minmax(18rem,1fr)]"
+      ? "reader-layout reader-layout-split grid grid-cols-[minmax(0,1fr)_minmax(18rem,1fr)]"
       : layout.value === "stack"
-        ? "grid grid-rows-2"
-        : "flex";
+        ? "reader-layout grid grid-rows-2"
+        : "reader-layout flex";
 
   return (
     <main
@@ -550,7 +552,7 @@ export default component$(() => {
         <div class="flex shrink-0 items-center gap-1">
           <button
             type="button"
-            class="viewer-icon-button hidden sm:inline-flex"
+            class="viewer-icon-button"
             disabled={page.value <= 1}
             aria-label={t("前のページ", "Previous page")}
             onClick$={() => updatePage(Math.max(1, page.value - 1))}
@@ -571,7 +573,7 @@ export default component$(() => {
           </span>
           <button
             type="button"
-            class="viewer-icon-button hidden sm:inline-flex"
+            class="viewer-icon-button"
             disabled={!totalPages.value || page.value >= totalPages.value}
             aria-label={t("次のページ", "Next page")}
             onClick$={() =>
@@ -607,7 +609,7 @@ export default component$(() => {
             </button>
           </div>
           <div
-            class="flex items-center gap-0.5"
+            class="hidden items-center gap-0.5 sm:flex"
             role="group"
             aria-label={t("PDFの表示倍率", "PDF zoom mode")}
           >
@@ -655,7 +657,7 @@ export default component$(() => {
             <option value="single">{t("単ページ", "Single page")}</option>
           </select>
           <select
-            class="viewer-toolbar-select max-w-32 sm:max-w-48"
+            class="viewer-toolbar-select max-w-24 sm:max-w-48"
             aria-label={t("表示レイアウト", "Layout")}
             title={t("表示レイアウト", "Layout")}
             value={layout.value}
@@ -747,11 +749,16 @@ export default component$(() => {
             )}
             <button
               type="button"
-              class="viewer-panel-button hidden md:inline-flex"
+              class="viewer-panel-button px-2 md:px-2.5"
               disabled={!file.value?.textByPage?.[page.value]?.trim()}
+              aria-label={t("このページを翻訳", "Translate page")}
+              title={t("このページを翻訳", "Translate page")}
               onClick$={translateCurrentPage}
             >
-              {t("このページを翻訳", "Translate page")}
+              <Icon name="Sparkles" size={15} />
+              <span class="hidden md:inline">
+                {t("このページを翻訳", "Translate page")}
+              </span>
             </button>
             <select
               class="viewer-panel-select"

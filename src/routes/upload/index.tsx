@@ -89,7 +89,6 @@ export default component$(() => {
     notice.value = "";
     noticeIsError.value = false;
     busy.value = true;
-    items.splice(0);
     try {
       if (navigator.storage?.estimate) {
         const storage = await navigator.storage.estimate();
@@ -104,7 +103,10 @@ export default component$(() => {
         }
       }
       const existing = await listPapers();
-      if (existing.length + selected.length > MAX_LOCAL_PAPERS) {
+      const pendingCount = items.filter(
+        (item) => !item.done && !item.skipped,
+      ).length;
+      if (existing.length + pendingCount + selected.length > MAX_LOCAL_PAPERS) {
         noticeIsError.value = true;
         notice.value = `登録上限は${MAX_LOCAL_PAPERS.toLocaleString()}件です。不要な論文を削除してください。`;
         return;
@@ -112,7 +114,10 @@ export default component$(() => {
       const existingHashes = new Set(
         existing.map((paper) => paper.contentHash).filter(Boolean),
       );
-      const seenHashes = new Set(existingHashes);
+      const seenHashes = new Set([
+        ...existingHashes,
+        ...items.map((item) => item.hash).filter(Boolean),
+      ]);
       for (const file of selected) {
         const inspection = {
           title: "",
@@ -299,13 +304,15 @@ export default component$(() => {
   return (
     <AppShell>
       <section
-        class="mx-auto max-w-6xl space-y-7"
+        class="app-page max-w-6xl space-y-7"
         data-render-tick={renderTick.value}
         onClick$={handleUploadClick}
       >
-        <h1 class="text-3xl font-bold tracking-[-0.04em]">
-          {localize(locale.value, "論文を追加", "Add papers")}
-        </h1>
+        <div class="page-heading">
+          <h1 class="text-3xl font-bold tracking-[-0.04em]">
+            {localize(locale.value, "論文を追加", "Add papers")}
+          </h1>
+        </div>
         <label
           class={`flex min-h-48 cursor-pointer flex-col items-center justify-center border-2 border-dashed px-6 text-center transition ${drag.value ? "border-sky-400 bg-sky-50" : "border-slate-300 bg-slate-50 hover:border-sky-400"}`}
           onDragOver$={(event) => {

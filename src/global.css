@@ -14,6 +14,7 @@
   --line: #d2d2d7;
   --soft-line: #e8e8ed;
   --surface: #f5f5f7;
+  --content-max: 76rem;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -168,6 +169,40 @@ svg {
   color: #111827;
 }
 
+@media (max-width: 639px) {
+  .paper-viewer-toolbar {
+    gap: 0;
+    padding-inline: 4px;
+  }
+
+  .paper-viewer-toolbar .viewer-icon-button {
+    width: 32px;
+    height: 32px;
+  }
+
+  .paper-viewer-toolbar .viewer-page-input {
+    width: 36px;
+  }
+
+  .paper-viewer-toolbar .viewer-toolbar-select {
+    max-width: 88px;
+    padding-right: 16px !important;
+    padding-left: 4px !important;
+  }
+}
+
+@media (max-width: 767px) {
+  .reader-layout-split {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .reader-layout-split > section:first-child {
+    border-right: 0 !important;
+    border-bottom: 1px solid rgb(0 0 0 / 0.3);
+  }
+}
+
 .viewer-panel-button {
   display: inline-flex;
   min-height: 32px;
@@ -209,6 +244,96 @@ select {
   color: #1d1d1f;
   padding: 10px 12px;
   outline: none;
+}
+
+/* Keep the leading search affordance clear of the editable text in every
+   browser, including when utility styles are reordered by the CSS pipeline. */
+.library-search-input {
+  padding-left: 2.75rem !important;
+}
+
+.pdf-search-input {
+  padding-left: 2.25rem !important;
+}
+
+/* Keep form controls predictable inside settings/workflow forms. */
+.form-layout label:has(> select),
+.form-layout label:has(> textarea),
+.form-layout label:has(> input:not([type="checkbox"]):not([type="radio"])) {
+  display: block;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.form-layout label:has(> select) > select,
+.form-layout label:has(> textarea) > textarea,
+.form-layout
+  label:has(> input:not([type="checkbox"]):not([type="radio"]))
+  > input {
+  display: block;
+  width: 100%;
+  margin-top: 0.5rem;
+}
+
+.form-layout label:has(> input[type="checkbox"]) {
+  cursor: pointer;
+}
+
+.app-page {
+  width: 100%;
+  max-width: var(--content-max);
+  margin-inline: auto;
+}
+
+/* Preserve comfortable reading widths on workflow screens while allowing the
+   library and upload queue to use the available space. */
+.app-page.max-w-4xl {
+  max-width: 56rem;
+}
+
+.app-page.max-w-5xl {
+  max-width: 64rem;
+}
+
+.app-page.max-w-6xl {
+  max-width: 72rem;
+}
+
+.page-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1.25rem;
+}
+
+.page-heading h1 {
+  margin-bottom: 0;
+  font-size: clamp(1.75rem, 3vw, 2.25rem);
+  line-height: 1.15;
+  letter-spacing: -0.04em;
+}
+
+.settings-action-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  margin-inline: -0.25rem;
+  padding: 0.75rem 0.25rem;
+  background: rgb(255 255 255 / 0.92);
+  box-shadow: 0 -1px 0 rgb(226 232 240 / 0.9);
+  backdrop-filter: blur(8px);
+}
+
+@media (max-width: 639px) {
+  .page-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .page-heading .button {
+    width: 100%;
+  }
 }
 input:focus,
 textarea:focus,
