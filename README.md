@@ -1,65 +1,51 @@
-# Qwik City App ⚡️
+# PaperLens frontend
 
-- [Qwik Docs](https://qwik.dev/)
-- [Discord](https://qwik.dev/chat)
-- [Qwik GitHub](https://github.com/QwikDev/qwik)
-- [@QwikDev](https://twitter.com/QwikDev)
-- [Vite](https://vitejs.dev/)
+要件定義をもとにした PaperLens の Qwik City フロントエンドです。PDF と論文メタデータを端末内へ保存する local-first 構成を前提にしています。
 
----
+## 開発
 
-## Project Structure
+プロジェクトルートで direnv を有効にしたあと、`frontend` で実行します。
 
-This project is using Qwik with [QwikCity](https://qwik.dev/qwikcity/overview/). QwikCity is just an extra set of tools on top of Qwik to make it easier to build a full site, including directory-based routing, layouts, and more.
-
-Inside your project, you'll see the following directory structure:
-
-```
-├── public/
-│   └── ...
-└── src/
-    ├── components/
-    │   └── ...
-    └── routes/
-        └── ...
+```sh
+direnv allow ..
+pnpm install
+pnpm dev
 ```
 
-- `src/routes`: Provides the directory-based routing, which can include a hierarchy of `layout.tsx` layout files, and an `index.tsx` file as the page. Additionally, `index.ts` files are endpoints. Please see the [routing docs](https://qwik.dev/qwikcity/routing/overview/) for more info.
+型チェックとプロダクションビルド:
 
-- `src/components`: Recommended directory for components.
-
-- `public`: Any static assets, like images, can be placed in the public directory. Please see the [Vite public directory](https://vitejs.dev/guide/assets.html#the-public-directory) for more info.
-
-## Add Integrations and deployment
-
-Use the `pnpm qwik add` command to add additional integrations. Some examples of integrations includes: Cloudflare, Netlify or Express Server, and the [Static Site Generator (SSG)](https://qwik.dev/qwikcity/guides/static-site-generation/).
-
-```shell
-pnpm qwik add # or `pnpm qwik add`
+```sh
+pnpm build
 ```
 
-## Development
+静的CDN配信用のビルド（Cloudflare Pages等の公開ディレクトリは`dist`）:
 
-Development mode uses [Vite's development server](https://vitejs.dev/). The `dev` command will server-side render (SSR) the output during development.
-
-```shell
-npm start # or `pnpm start`
+```sh
+pnpm run build.static
 ```
 
-> Note: during dev mode, Vite may request a significant number of `.js` files. This does not represent a Qwik production build.
+`build.static`はブラウザ内で完結するライブラリ・リーダーを静的ファイルとして出力します。`public/_redirects`で、ビルド時に存在しないローカル論文IDのパスもアプリシェルへフォールバックします。Go APIは別途`backend`のFly.ioデプロイで公開し、公開時だけ`VITE_API_BASE_URL=https://api.paperlens.micanis.dev`を指定します。
 
-## Preview
+## 構成
 
-The preview command will create a production build of the client modules, a production build of `src/entry.preview.tsx`, and run a local server. The preview server is only for convenience to preview a production build locally and should not be used as a production server.
+- `src/routes/` — ライブラリ、PDFリーダー、追加、設定のルート
+- `src/components/app-shell.tsx` — サイドバーとレスポンシブシェル
+- `src/components/ui/button.tsx` — `cva` + `cn` の共通ボタン
+- `src/lib/domain.ts` — `PaperDocument`、注釈、翻訳モードの共通型と Zod スキーマ
+- `src/lib/storage.ts` — PDFバイト列を Base64 化しない IndexedDB 境界
+- `src/lib/utils.ts` — `clsx` + `tailwind-merge` の `cn`
 
-```shell
-pnpm preview # or `pnpm preview`
-```
+## UI 方針
 
-## Production
+- Qwik City + TypeScript
+- Tailwind CSS v4（Vite plugin）
+- LINE Seed JP のセルフホスト
+- Lucide アイコン
+- PDF.js はリーダー表示時、本文抽出・全文検索・ZIP圧縮は Web Worker へ遅延ロード
+- `paperlens-managed`、各社API、OpenAI互換、local の翻訳モードを共通型で扱う
 
-The production build will generate client and server modules by running both client and server build commands. The build command will use Typescript to run a type check on the source code.
+PDF 本体をサーバーの必須依存にせず、翻訳時だけ共通 API 境界へ渡す設計です。
 
-```shell
-pnpm build # or `pnpm build`
-```
+## 実装済みの境界
+
+ライブラリ、PDF、注釈、翻訳結果、Provider の BYOK 設定はブラウザ内で完結します。PaperLens 管理 LLM を選択した場合だけ `VITE_API_BASE_URL` の Go API を利用します。アカウント、Stripe Checkout / Customer Portal / Webhook、プラン表示は認証済みのユーザー向けに Go API が提供します。決済未設定時は課金操作を有効化しません。

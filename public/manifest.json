@@ -1,9 +1,10 @@
 {
   "$schema": "https://json.schemastore.org/web-manifest-combined.json",
-  "name": "qwik-project-name",
-  "short_name": "Welcome to Qwik",
-  "start_url": ".",
+  "name": "PaperLens",
+  "short_name": "PaperLens",
+  "start_url": "/",
   "display": "standalone",
   "background_color": "#fff",
-  "description": "A Qwik project app."
+  "theme_color": "#38bdf8",
+  "description": "Local-first PDF reading and translation workspace."
 }

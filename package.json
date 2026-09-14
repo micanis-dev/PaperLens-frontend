@@ -1,6 +1,7 @@
 {
-  "name": "my-qwik-empty-starter",
-  "description": "Blank project with routing included",
+  "name": "paperlens-frontend",
+  "description": "PaperLens local-first paper library frontend",
+  "packageManager": "pnpm@11.22.0",
   "engines": {
     "node": "^18.17.0 || ^20.3.0 || >=21.0.0"
   },
@@ -10,9 +11,10 @@
   "scripts": {
     "build": "qwik build",
     "build.client": "vite build",
+    "build.static": "vite build --config adapters/static/vite.config.ts",
     "build.preview": "vite build --ssr src/entry.preview.tsx",
     "build.types": "tsc --incremental --noEmit",
-    "deploy": "echo 'Run \"npm run qwik add\" to install a server adapter'",
+    "deploy": "pnpm run build.static",
     "dev": "vite --mode ssr",
     "dev.debug": "node --inspect-brk ./node_modules/vite/bin/vite.js --mode ssr --force",
     "fmt": "prettier --write .",
@@ -26,16 +28,29 @@
     "@builder.io/qwik": "^1.20.0",
     "@builder.io/qwik-city": "^1.20.0",
     "@eslint/js": "^9",
+    "@tailwindcss/vite": "^4.1.13",
     "@types/node": "20.19.0",
     "eslint": "9.32.0",
     "eslint-plugin-qwik": "^1.20.0",
     "globals": "16.4.0",
     "prettier": "3.6.2",
+    "tailwindcss": "^4.1.13",
     "typescript": "5.4.5",
     "typescript-eslint": "8.38.0",
     "typescript-plugin-css-modules": "latest",
     "undici": "*",
     "vite": "7.3.1",
     "vite-tsconfig-paths": "^4.2.1"
+  },
+  "dependencies": {
+    "@fontsource/line-seed-jp": "^5.3.1",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "fflate": "^0.8.3",
+    "idb": "^8.0.0",
+    "lucide": "^1.44.0",
+    "pdfjs-dist": "^6.3.289",
+    "tailwind-merge": "^3.3.1",
+    "zod": "^4.6.1"
   }
 }

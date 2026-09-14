@@ -1,0 +1,261 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "LINE Seed JP", ui-sans-serif, system-ui, sans-serif;
+  --color-sky-400: #38bdf8;
+}
+
+:root {
+  font-family: "LINE Seed JP", ui-sans-serif, system-ui, sans-serif;
+  color: #0f172a;
+  background: #ffffff;
+  --accent: #38bdf8;
+  --accent-ink: #0369a1;
+  --line: #d2d2d7;
+  --soft-line: #e8e8ed;
+  --surface: #f5f5f7;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+  border-radius: 0 !important;
+}
+
+html {
+  min-width: 320px;
+  background: #ffffff;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  color: #1d1d1f;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button,
+a,
+input,
+textarea,
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+svg {
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+[data-pdf-text-layer] {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  line-height: 1;
+  transform-origin: 0 0;
+  opacity: 0.01;
+  user-select: text;
+}
+
+[data-pdf-text-layer] span {
+  position: absolute;
+  color: transparent;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0 0;
+}
+
+.pdf-reader:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  min-height: 0;
+}
+
+.paper-viewer-toolbar button,
+.paper-viewer-toolbar input,
+.paper-viewer-toolbar select {
+  border: 0;
+  box-shadow: none;
+}
+
+.viewer-icon-button,
+.viewer-icon-button-light {
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.viewer-icon-button {
+  color: rgb(255 255 255 / 0.88);
+}
+
+.viewer-icon-button:hover:not(:disabled) {
+  background: rgb(255 255 255 / 0.12);
+}
+
+.viewer-icon-button-light {
+  color: #475569;
+}
+
+.viewer-icon-button-light:hover:not(:disabled) {
+  background: #e8eaed;
+  color: #0f172a;
+}
+
+.viewer-page-input {
+  width: 42px;
+  height: 28px;
+  padding: 2px 4px;
+  border: 0;
+  border-bottom: 1px solid rgb(255 255 255 / 0.35) !important;
+  background: rgb(0 0 0 / 0.16) !important;
+  color: #fff !important;
+  text-align: center;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  appearance: textfield;
+}
+
+.viewer-page-input::-webkit-inner-spin-button,
+.viewer-page-input::-webkit-outer-spin-button {
+  margin: 0;
+  appearance: none;
+}
+
+.viewer-toolbar-select {
+  height: 32px;
+  padding: 4px 26px 4px 8px !important;
+  border: 0 !important;
+  background-color: rgb(0 0 0 / 0.16) !important;
+  color: rgb(255 255 255 / 0.9) !important;
+  font-size: 12px;
+}
+
+.viewer-toolbar-select option {
+  color: #111827;
+}
+
+.viewer-panel-button {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.viewer-panel-button:hover:not(:disabled) {
+  background: #f1f5f9;
+}
+
+.viewer-panel-select {
+  height: 32px;
+  max-width: 112px;
+  padding: 4px 24px 4px 8px;
+  font-size: 12px;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin-top: 0;
+}
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+input,
+textarea,
+select {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: #1d1d1f;
+  padding: 10px 12px;
+  outline: none;
+}
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.button {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid #86868b;
+  background: #fff;
+  padding: 9px 16px;
+  color: #1d1d1f;
+  font-size: 13px;
+  font-weight: 600;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+.button:hover:not(:disabled) {
+  background: var(--surface);
+  border-color: #6e6e73;
+}
+.button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #0f172a;
+}
+.button.primary:hover:not(:disabled) {
+  box-shadow: inset 0 0 0 999px rgb(15 23 42 / 6%);
+}
+.button.subtle {
+  border-color: transparent;
+  background: transparent;
+}
+.button.subtle:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--surface);
+}
+.muted {
+  color: #6e6e73;
+  font-size: 13px;
+}
+.accent {
+  color: var(--accent-ink) !important;
+}
