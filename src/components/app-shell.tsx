@@ -222,21 +222,6 @@ const QuickSwitcher = component$(() => {
 
 const navigation = (locale: Locale) => [
   { label: message(locale, "allPapers"), href: "/", icon: "Library" as const },
-  {
-    label: message(locale, "reading"),
-    href: "/?status=reading",
-    icon: "BookOpen" as const,
-  },
-  {
-    label: message(locale, "unread"),
-    href: "/?status=unread",
-    icon: "FileText" as const,
-  },
-  {
-    label: message(locale, "favorite"),
-    href: "/?favorite=true",
-    icon: "Heart" as const,
-  },
   { label: message(locale, "llm"), href: "/llm/", icon: "Sparkles" as const },
   {
     label: message(locale, "billing"),
