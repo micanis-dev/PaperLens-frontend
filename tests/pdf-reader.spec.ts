@@ -145,6 +145,17 @@ test("keeps zoom, text layer, and view mode in sync", async ({ page }) => {
   );
 });
 
+test("downloads the original PDF from a narrow reader toolbar", async ({ page }) => {
+  await seedPaper(page, 1);
+  await page.setViewportSize({ width: 375, height: 812 });
+  const downloadButton = page.getByRole("button", { name: "PDFをダウンロード" });
+  await expect(downloadButton).toBeVisible();
+  const downloadPromise = page.waitForEvent("download");
+  await downloadButton.click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe("reader-test.pdf");
+});
+
 test("keeps translation in the reader and hides implementation details", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("navigation", { name: "メインナビゲーション" })).not.toContainText("LLM");

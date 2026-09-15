@@ -67,6 +67,13 @@ async function hashText(text: string) {
 
 const normalizeSourceText = (text: string) => text.replace(/\s+/g, " ").trim();
 const pageLabel = (page: number, locale: "ja" | "en") => locale === "en" ? `Page ${page}` : `${page}ページ`;
+const safeDownloadName = (name: string, fallback: string) => {
+  const normalized = Array.from(
+    name.trim().replace(/[\\/:*?"<>|]/g, "_"),
+    (character) => (character.codePointAt(0)! < 32 ? "_" : character),
+  ).join("");
+  return normalized || fallback;
+};
 const InlineMarkdown = component$<{ text: string }>(({ text }) => {
   const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\(https?:\/\/[^)]+\))/g);
   return <>{parts.map((part, index) => {
@@ -649,7 +656,10 @@ export default component$(() => {
     const url = URL.createObjectURL(file.value.file);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = paper.value?.fileName || `${id}.pdf`;
+    anchor.download = safeDownloadName(
+      paper.value?.fileName || `${id}.pdf`,
+      `${id}.pdf`,
+    );
     anchor.click();
     URL.revokeObjectURL(url);
   });
@@ -888,7 +898,7 @@ export default component$(() => {
           </select>
           <button
             type="button"
-            class="viewer-icon-button hidden sm:inline-flex"
+            class="viewer-icon-button inline-flex shrink-0"
             aria-label={t("PDFをダウンロード", "Download PDF")}
             title={t("PDFをダウンロード", "Download PDF")}
             onClick$={downloadPdf}
