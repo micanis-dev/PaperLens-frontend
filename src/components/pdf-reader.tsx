@@ -83,10 +83,12 @@ export const PdfReader = component$<Props>(
     const pageError = useSignal("");
     const localZoom = useSignal(zoom);
     const selectedText = useSignal("");
+    const selectedClipboardText = useSignal("");
     const selectionTruncated = useSignal(false);
     const selectedRect = useSignal<AnnotationDraft["rect"]>();
     const selectedPage = useSignal(page);
     const selectionStatus = useSignal("");
+    const selectionStatusError = useSignal(false);
     const fullscreen = useSignal(false);
     const pageFromScroll = useSignal<number>();
     const renderTasks =
@@ -549,8 +551,10 @@ export const PdfReader = component$<Props>(
       const selection = window.getSelection();
       const quote = selection?.toString().trim() || "";
       selectionTruncated.value = quote.length > 4_000;
+      selectedClipboardText.value = quote;
       selectedText.value = quote.slice(0, 4_000);
       selectionStatus.value = "";
+      selectionStatusError.value = false;
       const range = selection?.rangeCount
         ? selection.getRangeAt(0).getBoundingClientRect()
         : undefined;
@@ -583,18 +587,21 @@ export const PdfReader = component$<Props>(
         rect: selectedRect.value,
       });
       selectedText.value = "";
+      selectedClipboardText.value = "";
       selectionTruncated.value = false;
       selectedRect.value = undefined;
       window.getSelection()?.removeAllRanges();
     });
     const copySelection = $(async () => {
       if (!selectedText.value) return;
+      const clipboardText = selectedClipboardText.value || selectedText.value;
       try {
-        if (navigator.clipboard?.writeText) {
-          await navigator.clipboard.writeText(selectedText.value);
-        } else {
+        try {
+          if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable");
+          await navigator.clipboard.writeText(clipboardText);
+        } catch {
           const textarea = document.createElement("textarea");
-          textarea.value = selectedText.value;
+          textarea.value = clipboardText;
           textarea.setAttribute("readonly", "true");
           textarea.style.position = "fixed";
           textarea.style.opacity = "0";
@@ -607,12 +614,14 @@ export const PdfReader = component$<Props>(
           }
         }
         selectionStatus.value = localize(locale.value, "コピーしました", "Copied");
+        selectionStatusError.value = false;
       } catch {
         selectionStatus.value = localize(
           locale.value,
           "コピーできませんでした。手動で選択してコピーしてください。",
           "Could not copy. Select the text and copy it manually.",
         );
+        selectionStatusError.value = true;
       }
     });
     const translateSelection = $(() => {
@@ -622,6 +631,7 @@ export const PdfReader = component$<Props>(
         quote: selectedText.value,
       });
       selectedText.value = "";
+      selectedClipboardText.value = "";
       selectionTruncated.value = false;
       selectedRect.value = undefined;
       window.getSelection()?.removeAllRanges();
@@ -1064,7 +1074,10 @@ export const PdfReader = component$<Props>(
                     {localize(locale.value, "コメント", "Comment")}
                   </button>
                   {selectionStatus.value && (
-                    <span role="status" class="text-emerald-700">
+                    <span
+                      role={selectionStatusError.value ? "alert" : "status"}
+                      class={selectionStatusError.value ? "text-red-700" : "text-emerald-700"}
+                    >
                       {selectionStatus.value}
                     </span>
                   )}

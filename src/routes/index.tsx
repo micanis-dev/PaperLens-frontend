@@ -34,6 +34,13 @@ const pageLabel = (page: number, locale: "ja" | "en") =>
     : locale === "en"
       ? "Whole paper"
       : "論文全体";
+const safeDownloadName = (name: string, fallback: string) => {
+  const normalized = Array.from(
+    name.trim().replace(/[\\/:*?"<>|]/g, "_"),
+    (character) => (character.codePointAt(0)! < 32 ? "_" : character),
+  ).join("");
+  return normalized || fallback;
+};
 
 export default component$(() => {
   const locale = useLocale();
@@ -260,6 +267,20 @@ export default component$(() => {
       error.value = caught instanceof Error ? caught.message : "論文を削除できませんでした";
     } finally {
       removingPaper.value = "";
+    }
+  });
+  const downloadPaper = $(async (paper: PaperDocument) => {
+    try {
+      const file = await getPaperFile(paper.id);
+      if (!file) throw new Error("この論文のPDF本体が見つかりません。");
+      const url = URL.createObjectURL(file.file);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = safeDownloadName(paper.fileName, `${paper.id}.pdf`);
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (caught) {
+      error.value = caught instanceof Error ? caught.message : "PDFをダウンロードできませんでした";
     }
   });
   return (
@@ -658,6 +679,18 @@ export default component$(() => {
                       onClick$={() => deletePaper(paper)}
                     >
                       <Icon name="Trash2" size={16} />
+                    </button>
+                    <button
+                      type="button"
+                      class="flex size-8 items-center justify-center text-slate-400 hover:text-sky-700"
+                      aria-label={
+                        locale.value === "en"
+                          ? `Download ${paper.title || paper.fileName}`
+                          : `${paper.title || paper.fileName}をダウンロード`
+                      }
+                      onClick$={() => downloadPaper(paper)}
+                    >
+                      <Icon name="FileDown" size={16} />
                     </button>
                   </div>
                   {firstMatch && firstMatch.pageNumber > 0 && (

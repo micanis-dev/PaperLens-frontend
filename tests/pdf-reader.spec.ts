@@ -178,6 +178,16 @@ test("copies selected PDF text from the reader action bar", async ({ page }) => 
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain("PaperLens page 1");
 });
 
+test("downloads a paper directly from the library", async ({ page }) => {
+  await seedPaper(page, 1);
+  await page.goto("/");
+  const downloadButton = page.getByRole("button", { name: "Reader regression testをダウンロード" });
+  await expect(downloadButton).toBeVisible();
+  const downloadPromise = page.waitForEvent("download");
+  await downloadButton.click();
+  expect((await downloadPromise).suggestedFilename()).toBe("reader-test.pdf");
+});
+
 test("keeps translation in the reader and hides implementation details", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("navigation", { name: "メインナビゲーション" })).not.toContainText("LLM");
