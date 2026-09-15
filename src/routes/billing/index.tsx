@@ -38,6 +38,8 @@ export default component$(() => {
   const credits = useSignal<CreditBalance>();
   const consumed = useSignal(0);
 
+  // Billing state is loaded after the client session is available.
+  // eslint-disable-next-line qwik/no-use-visible-task
   useVisibleTask$(async () => {
     try {
       const [billing, catalog, creditResponse, usageResponse] =

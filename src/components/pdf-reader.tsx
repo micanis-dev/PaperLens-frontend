@@ -3,7 +3,6 @@ import {
   component$,
   noSerialize,
   useOnDocument,
-  useOnWindow,
   useSignal,
   useVisibleTask$,
 } from "@builder.io/qwik";
@@ -121,13 +120,19 @@ export const PdfReader = component$<Props>(
         renderedCanvas.height = Math.ceil(viewport.height * ratio);
         renderedCanvas.style.width = `${viewport.width}px`;
         renderedCanvas.style.height = "auto";
-        renderedCanvas.style.maxWidth = "100%";
+        // Keep the canvas and PDF.js text layer in the same coordinate space.
+        // Responsive CSS shrinking makes the bitmap narrower while the text
+        // spans retain their PDF viewport coordinates, which breaks selection
+        // and annotation placement. Fit-to-width changes the render scale
+        // explicitly instead; the scroll area handles wider pages at 100%.
+        renderedCanvas.style.maxWidth = "none";
         renderedCanvas.style.display = "block";
         renderedCanvas.setAttribute(
           "aria-label",
           `${localize(locale.value, "PDF", "PDF")} ${pageNumber} ${localize(locale.value, "ページ", "page")}`,
         );
         target.style.width = `${viewport.width}px`;
+        target.style.minHeight = "0";
         target.style.height = "auto";
         target.style.aspectRatio = `${viewport.width} / ${viewport.height}`;
         target.replaceChildren(renderedCanvas);
@@ -200,13 +205,32 @@ export const PdfReader = component$<Props>(
         });
     });
 
-    useVisibleTask$(async () => {
+    // PDF.js and IndexedDB are browser-only. Dispose the document explicitly so
+    // changing papers does not leave a worker and page caches alive.
+    // eslint-disable-next-line qwik/no-use-visible-task
+    useVisibleTask$(async ({ cleanup }) => {
+      let disposed = false;
+      cleanup(() => {
+        disposed = true;
+        for (const host of container.value?.querySelectorAll<HTMLElement>(
+          "[data-pdf-page-host], [data-pdf-thumbnail]",
+        ) || [])
+          void releaseCanvas(host);
+        const loadedPdf = pdf.value;
+        pdf.value = undefined;
+        void loadedPdf?.destroy?.();
+      });
       renderTasks.value = noSerialize(new WeakMap());
       try {
         const file = await getPaperFile(documentId);
         if (!file) throw new Error("PDF本体が見つかりません。");
         textByPage.value = file.textByPage || {};
-        pdf.value = noSerialize(await loadPdf(file.file));
+        const loadedPdf = await loadPdf(file.file);
+        if (disposed) {
+          await loadedPdf.destroy?.();
+          return;
+        }
+        pdf.value = noSerialize(loadedPdf);
         pages.value = pdf.value.numPages;
         void onPages$?.(pages.value);
       } catch (e) {
@@ -217,6 +241,7 @@ export const PdfReader = component$<Props>(
       }
     });
 
+    // eslint-disable-next-line qwik/no-use-visible-task
     useVisibleTask$(({ track }) => {
       const nextZoom = track(() => zoom);
       if (nextZoom !== localZoom.value) localZoom.value = nextZoom;
@@ -224,6 +249,7 @@ export const PdfReader = component$<Props>(
 
     // Render only the viewport and nearby pages. Canvases that are far outside
     // the viewport release their backing bitmap to keep large PDFs bounded.
+    // eslint-disable-next-line qwik/no-use-visible-task
     useVisibleTask$(({ track, cleanup }) => {
       track(() => pages.value);
       track(() => page);
@@ -306,6 +332,7 @@ export const PdfReader = component$<Props>(
       });
     });
 
+    // eslint-disable-next-line qwik/no-use-visible-task
     useVisibleTask$(({ track }) => {
       track(() => page);
       track(() => viewMode);
@@ -337,9 +364,10 @@ export const PdfReader = component$<Props>(
       }),
     );
 
-    useOnWindow(
-      "keydown",
-      $((event) => {
+    // Register natively so browser search/scroll is cancelled synchronously.
+    // eslint-disable-next-line qwik/no-use-visible-task
+    useVisibleTask$(({ cleanup }) => {
+      const handleKeydown = (event: KeyboardEvent) => {
         if (!active) return;
         const target = event.target as HTMLElement | null;
         const editing =
@@ -374,8 +402,10 @@ export const PdfReader = component$<Props>(
         if (event.key === "-") void zoomTo(localZoom.value - 0.1);
         if (!minimal && event.key.toLowerCase() === "f")
           void toggleFullscreen();
-      }),
-    );
+      };
+      window.addEventListener("keydown", handleKeydown);
+      cleanup(() => window.removeEventListener("keydown", handleKeydown));
+    });
 
     const runSearch = $(() => {
       const needle = search.value.trim().toLowerCase();
@@ -472,6 +502,7 @@ export const PdfReader = component$<Props>(
         },
       );
     });
+    // eslint-disable-next-line qwik/no-use-visible-task
     useVisibleTask$(({ track, cleanup }) => {
       const requestedVersion = track(() => fitVersion);
       const requestedMode = track(() => fitMode);
@@ -713,82 +744,82 @@ export const PdfReader = component$<Props>(
               ))}
             </div>
           </aside>
-          <div class="flex min-w-0 flex-col">
-            {!minimal && (
-              <div class="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white px-3 py-2">
-                <label class="relative min-w-48 flex-1">
-                  <span class="sr-only">
-                    {localize(locale.value, "PDF内検索", "Search PDF")}
-                  </span>
-                  <Icon
-                    name="Search"
-                    size={15}
-                    class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-slate-400"
-                  />
-                  <input
-                    ref={searchInput}
-                    class="pdf-search-input w-full py-1 pl-8 text-xs"
-                    placeholder={localize(
+          <div class="flex min-h-0 min-w-0 flex-col">
+            <div class="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white px-3 py-2">
+              <label class="relative min-w-48 flex-1">
+                <span class="sr-only">
+                  {localize(locale.value, "PDF内検索", "Search PDF")}
+                </span>
+                <Icon
+                  name="Search"
+                  size={15}
+                  class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-slate-400"
+                />
+                <input
+                  ref={searchInput}
+                  class="pdf-search-input w-full py-1 pl-8 text-xs"
+                  placeholder={localize(
+                    locale.value,
+                    "PDF内検索",
+                    "Search PDF",
+                  )}
+                  value={search.value}
+                  aria-invalid={searchError.value ? "true" : undefined}
+                  onInput$={(_, el) => {
+                    search.value = el.value;
+                    searchError.value = "";
+                    searchMatches.value = [];
+                    searchMatchIndex.value = -1;
+                  }}
+                  onKeyDown$={(event) => {
+                    if (event.key === "Enter") void runSearch();
+                  }}
+                />
+              </label>
+              <button
+                type="button"
+                class="button subtle py-1 text-xs"
+                onClick$={runSearch}
+              >
+                {localize(locale.value, "検索", "Search")}
+              </button>
+              {searchMatches.value.length > 0 && (
+                <div class="flex items-center gap-1 text-xs text-slate-600">
+                  <button
+                    type="button"
+                    class="button subtle py-1"
+                    aria-label={localize(
                       locale.value,
-                      "PDF内検索",
-                      "Search PDF",
+                      "前の検索結果",
+                      "Previous match",
                     )}
-                    value={search.value}
-                    aria-invalid={searchError.value ? "true" : undefined}
-                    onInput$={(_, el) => {
-                      search.value = el.value;
-                      searchError.value = "";
-                      searchMatches.value = [];
-                      searchMatchIndex.value = -1;
-                    }}
-                    onKeyDown$={(event) => {
-                      if (event.key === "Enter") void runSearch();
-                    }}
-                  />
-                </label>
-                <button
-                  type="button"
-                  class="button subtle py-1 text-xs"
-                  onClick$={runSearch}
-                >
-                  {localize(locale.value, "検索", "Search")}
-                </button>
-                {searchMatches.value.length > 0 && (
-                  <div class="flex items-center gap-1 text-xs text-slate-600">
-                    <button
-                      type="button"
-                      class="button subtle py-1"
-                      aria-label={localize(
-                        locale.value,
-                        "前の検索結果",
-                        "Previous match",
-                      )}
-                      onClick$={() => moveSearch(-1)}
-                    >
-                      <Icon name="ChevronLeft" size={15} />
-                    </button>
-                    <span class="tabular-nums">
-                      {searchMatchIndex.value + 1}/{searchMatches.value.length}
-                    </span>
-                    <button
-                      type="button"
-                      class="button subtle py-1"
-                      aria-label={localize(
-                        locale.value,
-                        "次の検索結果",
-                        "Next match",
-                      )}
-                      onClick$={() => moveSearch(1)}
-                    >
-                      <Icon name="ChevronRight" size={15} />
-                    </button>
-                  </div>
-                )}
-                {searchError.value && (
-                  <span role="alert" class="text-xs text-red-700">
-                    {searchError.value}
+                    onClick$={() => moveSearch(-1)}
+                  >
+                    <Icon name="ChevronLeft" size={15} />
+                  </button>
+                  <span class="tabular-nums">
+                    {searchMatchIndex.value + 1}/{searchMatches.value.length}
                   </span>
-                )}
+                  <button
+                    type="button"
+                    class="button subtle py-1"
+                    aria-label={localize(
+                      locale.value,
+                      "次の検索結果",
+                      "Next match",
+                    )}
+                    onClick$={() => moveSearch(1)}
+                  >
+                    <Icon name="ChevronRight" size={15} />
+                  </button>
+                </div>
+              )}
+              {searchError.value && (
+                <span role="alert" class="text-xs text-red-700">
+                  {searchError.value}
+                </span>
+              )}
+              {!minimal && (
                 <button
                   type="button"
                   class="button subtle py-1 text-xs"
@@ -797,8 +828,8 @@ export const PdfReader = component$<Props>(
                 >
                   {localize(locale.value, "このページを翻訳", "Translate page")}
                 </button>
-              </div>
-            )}
+              )}
+            </div>
             <div
               ref={scrollArea}
               class={
@@ -822,14 +853,19 @@ export const PdfReader = component$<Props>(
               ) : viewMode === "single" ? (
                 <div class="mx-auto w-fit" data-pdf-page-shell={page}>
                   <div
-                    class="relative max-w-full bg-white shadow-xl"
+                    class="relative bg-white shadow-xl"
                     onMouseUp$={captureSelection}
                   >
                     <div
                       ref={singlePageHost}
                       data-pdf-page-host
                       data-page={page}
-                      class="relative max-w-full overflow-hidden"
+                      class="pdf-page-placeholder relative overflow-hidden"
+                      style={{
+                        width: "min(48rem, calc(100vw - 3rem))",
+                        minHeight: "min(64rem, calc((100vw - 3rem) * 4 / 3))",
+                        aspectRatio: "3 / 4",
+                      }}
                     />
                     {pageAnnotations(page).map((item) => (
                       <span
@@ -864,13 +900,18 @@ export const PdfReader = component$<Props>(
                     <article
                       key={number}
                       data-pdf-page-shell={number}
-                      class="relative w-fit max-w-full bg-white shadow-xl"
+                      class="relative w-fit bg-white shadow-xl"
                       onMouseUp$={captureSelection}
                     >
                       <div
                         data-pdf-page-host
                         data-page={number}
-                        class="relative max-w-full overflow-hidden"
+                        class="pdf-page-placeholder relative overflow-hidden"
+                        style={{
+                          width: "min(48rem, calc(100vw - 3rem))",
+                          minHeight: "min(64rem, calc((100vw - 3rem) * 4 / 3))",
+                          aspectRatio: "3 / 4",
+                        }}
                         aria-label={`${localize(locale.value, "PDF", "PDF")} ${number} ${localize(locale.value, "ページ", "page")}`}
                       />
                       {pageAnnotations(number).map((item) => (

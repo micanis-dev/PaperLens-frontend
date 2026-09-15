@@ -33,7 +33,7 @@ export function isStorageReadOnly() {
 
 function assertWritable() {
   if (readOnly) {
-    throw new Error("ローカルDBの移行に失敗したため読み取り専用です。データをエクスポートしてからブラウザのサイトデータを確認してください。");
+    throw new Error("端末内データを更新できないため読み取り専用です。先にバックアップを作成し、ブラウザの保存設定を確認してください。");
   }
 }
 

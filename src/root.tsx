@@ -24,6 +24,8 @@ export default component$(() => {
 
   const locale = useSignal<Locale>("ja");
   useContextProvider(localeContext, locale);
+  // Locale preferences and service workers are browser-only.
+  // eslint-disable-next-line qwik/no-use-visible-task
   useVisibleTask$(async () => {
     try {
       const saved = await getSetting("uiLanguage", "ja");

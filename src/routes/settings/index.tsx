@@ -18,8 +18,8 @@ import {
   saveSetting,
 } from "~/lib/storage";
 import { exportBackupZip, importBackupZip } from "~/lib/backup";
-import { paperDocumentSchema } from "~/lib/domain";
 import {
+  checkManagedAccess,
   cancelAccountDeletion,
   apiBaseURL,
   getAccount,
@@ -30,7 +30,32 @@ import {
   type AccountDeletion,
   type LinkedIdentity,
 } from "~/lib/api";
+import {
+  getSessionProvider,
+  rememberProviderSettings,
+  testProvider,
+  validateProviderUrl,
+} from "~/lib/llm";
+import {
+  managedModels,
+  paperDocumentSchema,
+  type ProviderSettings,
+} from "~/lib/domain";
 import { localize, useLocale } from "~/lib/i18n";
+
+const defaultProvider: ProviderSettings = {
+  mode: "local",
+  model: "llama3.2",
+  baseUrl: "http://127.0.0.1:11434/v1",
+  targetLanguage: "ja",
+  connected: false,
+};
+
+type ConnectionErrors = {
+  model?: string;
+  baseUrl?: string;
+  apiKey?: string;
+};
 
 export default component$(() => {
   const locale = useLocale();
@@ -52,13 +77,28 @@ export default component$(() => {
   const deletionBusy = useSignal(false);
   const linkedIdentities = useSignal<LinkedIdentity[]>([]);
   const identityBusy = useSignal("");
+  const provider = useSignal<ProviderSettings>(defaultProvider);
+  const apiKey = useSignal("");
+  const connectionErrors = useSignal<ConnectionErrors>({});
+  const connectionBusy = useSignal(false);
+  const connectionMessage = useSignal("");
+  const connectionFailed = useSignal(false);
+  // Settings depend on browser storage and the current browser session.
+  // eslint-disable-next-line qwik/no-use-visible-task
   useVisibleTask$(async () => {
     try {
-      language.value = await getSetting("uiLanguage", "ja");
-      viewMode.value = await getSetting("viewMode", "continuous");
+      const [savedLanguage, savedViewMode, savedProvider] = await Promise.all([
+        getSetting<string>("uiLanguage", "ja"),
+        getSetting<"continuous" | "single">("viewMode", "continuous"),
+        getSetting("provider", defaultProvider),
+      ]);
+      language.value = savedLanguage;
+      viewMode.value = savedViewMode;
+      provider.value = savedProvider;
+      apiKey.value = getSessionProvider()?.apiKey || "";
     } catch {
       storageState.value = "unavailable";
-      storageInfo.value = "このブラウザではIndexedDBを利用できません";
+      storageInfo.value = "このブラウザでは端末内保存を利用できません";
       return;
     }
     try {
@@ -66,7 +106,7 @@ export default component$(() => {
       storageState.value = isStorageReadOnly() ? "unavailable" : "ready";
     } catch {
       storageState.value = "unavailable";
-      storageInfo.value = "このブラウザではIndexedDBを利用できません";
+      storageInfo.value = "このブラウザでは端末内保存を利用できません";
       return;
     }
     if (!navigator.storage?.estimate)
@@ -74,7 +114,7 @@ export default component$(() => {
     else {
       const estimate = await navigator.storage.estimate();
       const ratio = estimate.quota ? (estimate.usage || 0) / estimate.quota : 0;
-      storageInfo.value = `${Math.round((estimate.usage || 0) / 1024 / 1024)}MB 使用 / ${estimate.quota ? `${Math.round(estimate.quota / 1024 / 1024)}MB` : "上限不明"}${isStorageReadOnly() ? " · 読み取り専用" : ratio >= 0.95 ? " · 新規登録停止" : ratio >= 0.8 ? " · 容量に注意" : ""}`;
+      storageInfo.value = `${Math.round((estimate.usage || 0) / 1024 / 1024)}MB / ${estimate.quota ? `${Math.round(estimate.quota / 1024 / 1024)}MB` : "上限不明"}${isStorageReadOnly() ? " · 読み取り専用" : ratio >= 0.95 ? " · 空き容量がありません" : ratio >= 0.8 ? " · 空き容量が少なくなっています" : ""}`;
     }
     try {
       const response = await getAccount();
@@ -83,6 +123,126 @@ export default component$(() => {
       linkedIdentities.value = (await getLinkedIdentities()).identities;
     } catch {
       accountState.value = "signed-out";
+    }
+  });
+  const updateProvider = $((patch: Partial<ProviderSettings>) => {
+    provider.value = { ...provider.value, ...patch, connected: false };
+    connectionErrors.value = {};
+    connectionMessage.value = "";
+  });
+  const connectProvider = $(async () => {
+    if (connectionBusy.value) return;
+    const errors: ConnectionErrors = {};
+    const model = provider.value.model.trim();
+    if (!model)
+      errors.model = localize(
+        locale.value,
+        "モデルを入力してください",
+        "Enter a model",
+      );
+    else if (model.length > 200)
+      errors.model = localize(
+        locale.value,
+        "200文字以内で入力してください",
+        "Use 200 characters or fewer",
+      );
+
+    let baseUrl = provider.value.baseUrl.trim();
+    if (
+      provider.value.mode === "local" ||
+      provider.value.mode === "openai-compatible"
+    ) {
+      if (!baseUrl)
+        errors.baseUrl = localize(
+          locale.value,
+          "接続先を入力してください",
+          "Enter an endpoint",
+        );
+      else {
+        try {
+          baseUrl = validateProviderUrl(
+            baseUrl,
+            provider.value.mode === "local",
+          );
+        } catch (error) {
+          errors.baseUrl =
+            error instanceof Error
+              ? error.message
+              : localize(
+                  locale.value,
+                  "接続先を確認してください",
+                  "Check the endpoint",
+                );
+        }
+      }
+    }
+    if (
+      ["openai", "google", "anthropic"].includes(provider.value.mode) &&
+      !apiKey.value.trim()
+    )
+      errors.apiKey = localize(
+        locale.value,
+        "APIキーを入力してください",
+        "Enter an API key",
+      );
+
+    connectionErrors.value = errors;
+    if (Object.keys(errors).length) {
+      connectionFailed.value = true;
+      connectionMessage.value = localize(
+        locale.value,
+        "入力内容を確認してください。",
+        "Check the highlighted fields.",
+      );
+      return;
+    }
+
+    connectionBusy.value = true;
+    connectionFailed.value = false;
+    connectionMessage.value = localize(
+      locale.value,
+      "接続を確認しています…",
+      "Checking connection…",
+    );
+    const candidate: ProviderSettings = {
+      ...provider.value,
+      model,
+      baseUrl,
+      apiKey: apiKey.value.trim() || undefined,
+      connected: true,
+    };
+    try {
+      if (candidate.mode === "paperlens-managed") await checkManagedAccess();
+      else await testProvider(candidate);
+      provider.value = { ...candidate, apiKey: undefined };
+      rememberProviderSettings(candidate);
+      const canReconnectWithoutSecret =
+        candidate.mode === "paperlens-managed" ||
+        candidate.mode === "local" ||
+        (candidate.mode === "openai-compatible" && !candidate.apiKey);
+      await saveSetting("provider", {
+        ...candidate,
+        apiKey: undefined,
+        connected: canReconnectWithoutSecret,
+      });
+      connectionMessage.value = localize(
+        locale.value,
+        "接続できました。PDFリーダーで翻訳を利用できます。",
+        "Connected. Translation is ready in the PDF reader.",
+      );
+    } catch (error) {
+      provider.value = { ...provider.value, connected: false };
+      connectionFailed.value = true;
+      connectionMessage.value =
+        error instanceof Error
+          ? error.message
+          : localize(
+              locale.value,
+              "接続できませんでした。",
+              "Could not connect.",
+            );
+    } finally {
+      connectionBusy.value = false;
     }
   });
   const unlinkSSO = $(async (provider: LinkedIdentity["provider"]) => {
@@ -306,33 +466,231 @@ export default component$(() => {
         </section>
         <section class="border border-slate-200 bg-white p-6">
           <div class="flex flex-wrap items-start justify-between gap-4">
-            <h2 class="font-bold">{t("ローカル保存", "Local storage")}</h2>
+            <div>
+              <h2 class="font-bold">
+                {t("端末内のデータ", "Data on this device")}
+              </h2>
+              <p class="mt-2 text-sm text-slate-500">
+                {t(
+                  "PDFとメモはこの端末に保存されます。",
+                  "PDFs and notes are stored on this device.",
+                )}
+              </p>
+            </div>
             <span
               class={`border px-2.5 py-1 text-xs font-bold ${storageState.value === "ready" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : storageState.value === "unavailable" ? "border-red-200 bg-red-50 text-red-700" : "border-slate-200 bg-slate-50 text-slate-600"}`}
             >
               {storageState.value === "ready"
-                ? t("IndexedDB 有効", "IndexedDB available")
+                ? t("利用できます", "Available")
                 : storageState.value === "unavailable"
                   ? isStorageReadOnly()
                     ? t("読み取り専用", "Read-only")
-                    : t("IndexedDB 非対応", "IndexedDB unavailable")
+                    : t("利用できません", "Unavailable")
                   : t("確認中…", "Checking…")}
             </span>
           </div>
           <div class="mt-5 border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
             <p>
-              {t("保存領域", "Storage")}: {storageInfo.value}
+              {t("使用量", "Used")}: {storageInfo.value}
             </p>
           </div>
         </section>
-        <section class="border border-slate-200 bg-white p-6">
-          <div class="flex items-start justify-between gap-4">
-            <h2 class="font-bold">{t("LLM接続", "LLM connection")}</h2>
-            <Link href="/llm/" class="button">
-              <Icon name="Sparkles" size={16} />
-              {t("LLM画面を開く", "Open LLM workspace")}
-            </Link>
+        <section
+          id="ai-connection"
+          class="form-layout scroll-mt-6 border border-slate-200 bg-white p-6"
+        >
+          <div class="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h2 class="font-bold">{t("AI翻訳", "AI translation")}</h2>
+              <p class="mt-2 text-sm text-slate-500">
+                {t(
+                  "接続後、PDFリーダーの翻訳ボタンから利用できます。",
+                  "After connecting, use the translate button in the PDF reader.",
+                )}
+              </p>
+            </div>
+            <span
+              class={`inline-flex items-center gap-2 border px-3 py-1.5 text-xs font-bold ${provider.value.connected ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-800"}`}
+              role="status"
+            >
+              <span
+                class={`size-2 ${provider.value.connected ? "bg-emerald-500" : "bg-amber-400"}`}
+                aria-hidden="true"
+              />
+              {provider.value.connected
+                ? t("接続済み", "Connected")
+                : t("未接続", "Not connected")}
+            </span>
           </div>
+          <div class="mt-5 grid gap-5 sm:grid-cols-2">
+            <label>
+              {t("接続方法", "Connection")}
+              <select
+                value={provider.value.mode}
+                disabled={connectionBusy.value}
+                onChange$={(_, el) => {
+                  const mode = el.value as ProviderSettings["mode"];
+                  updateProvider({
+                    mode,
+                    model:
+                      mode === "paperlens-managed"
+                        ? "gpt-5.6-terra"
+                        : provider.value.model,
+                    baseUrl:
+                      mode === "local"
+                        ? "http://127.0.0.1:11434/v1"
+                        : provider.value.baseUrl,
+                  });
+                }}
+              >
+                <option value="paperlens-managed">PaperLens AI</option>
+                <option value="local">
+                  {t("この端末のAI", "AI on this device")}
+                </option>
+                <option value="openai">OpenAI</option>
+                <option value="google">Google</option>
+                <option value="anthropic">Anthropic</option>
+                <option value="openai-compatible">
+                  {t("その他のAPI", "Other API")}
+                </option>
+              </select>
+            </label>
+            <label>
+              {t("モデル", "Model")}
+              {provider.value.mode === "paperlens-managed" ? (
+                <select
+                  value={provider.value.model}
+                  disabled={connectionBusy.value}
+                  onChange$={(_, el) => updateProvider({ model: el.value })}
+                >
+                  {managedModels.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.label}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  value={provider.value.model}
+                  maxLength={200}
+                  disabled={connectionBusy.value}
+                  aria-invalid={
+                    connectionErrors.value.model ? "true" : undefined
+                  }
+                  aria-describedby={
+                    connectionErrors.value.model ? "ai-model-error" : undefined
+                  }
+                  onInput$={(_, el) => updateProvider({ model: el.value })}
+                />
+              )}
+              {connectionErrors.value.model && (
+                <span
+                  id="ai-model-error"
+                  class="mt-1 block text-xs font-normal text-red-700"
+                  role="alert"
+                >
+                  {connectionErrors.value.model}
+                </span>
+              )}
+            </label>
+            {(provider.value.mode === "local" ||
+              provider.value.mode === "openai-compatible") && (
+              <label class="sm:col-span-2">
+                {t("接続先", "Endpoint")}
+                <input
+                  inputMode="url"
+                  value={provider.value.baseUrl}
+                  disabled={connectionBusy.value}
+                  aria-invalid={
+                    connectionErrors.value.baseUrl ? "true" : undefined
+                  }
+                  aria-describedby={
+                    connectionErrors.value.baseUrl ? "ai-url-error" : undefined
+                  }
+                  onInput$={(_, el) => updateProvider({ baseUrl: el.value })}
+                />
+                {connectionErrors.value.baseUrl ? (
+                  <span
+                    id="ai-url-error"
+                    class="mt-1 block text-xs font-normal text-red-700"
+                    role="alert"
+                  >
+                    {connectionErrors.value.baseUrl}
+                  </span>
+                ) : (
+                  <span class="mt-1 block text-xs font-normal text-slate-500">
+                    {t(
+                      "この端末または信頼できるHTTPS接続先を指定してください。",
+                      "Use an endpoint on this device or a trusted HTTPS endpoint.",
+                    )}
+                  </span>
+                )}
+              </label>
+            )}
+            {provider.value.mode !== "paperlens-managed" &&
+              provider.value.mode !== "local" && (
+                <label class="sm:col-span-2">
+                  {t(
+                    "APIキー（この画面を閉じるまで）",
+                    "API key (this session only)",
+                  )}
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    value={apiKey.value}
+                    disabled={connectionBusy.value}
+                    aria-invalid={
+                      connectionErrors.value.apiKey ? "true" : undefined
+                    }
+                    aria-describedby={
+                      connectionErrors.value.apiKey ? "ai-key-error" : undefined
+                    }
+                    onInput$={(_, el) => {
+                      apiKey.value = el.value;
+                      updateProvider({});
+                    }}
+                  />
+                  {connectionErrors.value.apiKey && (
+                    <span
+                      id="ai-key-error"
+                      class="mt-1 block text-xs font-normal text-red-700"
+                      role="alert"
+                    >
+                      {connectionErrors.value.apiKey}
+                    </span>
+                  )}
+                </label>
+              )}
+          </div>
+          <div class="mt-5 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              class="button primary"
+              disabled={connectionBusy.value}
+              onClick$={connectProvider}
+            >
+              <Icon
+                name={provider.value.connected ? "Check" : "RefreshCw"}
+                size={16}
+              />
+              {connectionBusy.value
+                ? t("確認中…", "Checking…")
+                : t("接続を確認", "Check connection")}
+            </button>
+            {provider.value.mode === "paperlens-managed" && (
+              <Link href="/login/" class="button subtle">
+                {t("アカウントを確認", "Check account")}
+              </Link>
+            )}
+          </div>
+          {connectionMessage.value && (
+            <p
+              class={`mt-4 border-l-2 p-3 text-sm ${connectionFailed.value ? "border-red-400 bg-red-50 text-red-800" : "border-emerald-400 bg-emerald-50 text-emerald-800"}`}
+              role={connectionFailed.value ? "alert" : "status"}
+            >
+              {connectionMessage.value}
+            </p>
+          )}
         </section>
         <section class="flex flex-wrap items-center justify-between gap-4 border border-slate-200 bg-white p-6">
           <div>
@@ -446,11 +804,11 @@ export default component$(() => {
           </section>
         )}
         <section class="border border-slate-200 bg-white p-6">
-          <h2 class="font-bold">{t("データ管理", "Data management")}</h2>
+          <h2 class="font-bold">{t("バックアップ", "Backup")}</h2>
           <p class="mt-1 text-sm text-slate-500">
             {t(
-              "JSONはメタデータのみ、ZIPはPDF・抽出本文・メタデータ・翻訳・注釈を含めてバックアップします。合計1GBまでです。",
-              "JSON contains metadata only. ZIP includes PDFs, extracted text, metadata, translations, and annotations, up to 1GB.",
+              "PDF、翻訳、メモをまとめて保存し、別のブラウザでも復元できます。",
+              "Save your PDFs, translations, and notes together, then restore them in another browser.",
             )}
           </p>
           {exportController.value && (
@@ -459,7 +817,8 @@ export default component$(() => {
               role="status"
             >
               <span>
-                {t("ZIPを生成中…", "Creating ZIP…")} {exportProgress.value}%
+                {t("バックアップを作成中…", "Creating backup…")}{" "}
+                {exportProgress.value}%
               </span>
               <button
                 type="button"
@@ -478,11 +837,7 @@ export default component$(() => {
               onClick$={exportZip}
             >
               <Icon name="Download" size={16} />
-              {t("一括ZIPエクスポート", "Export ZIP backup")}
-            </button>
-            <button type="button" class="button" onClick$={exportData}>
-              <Icon name="Download" size={16} />
-              {t("JSONエクスポート", "Export JSON")}
+              {t("バックアップを作成", "Create backup")}
             </button>
             <button
               type="button"
@@ -509,9 +864,24 @@ export default component$(() => {
               onClick$={clearData}
             >
               <Icon name="Trash2" size={16} />
-              {t("すべて削除", "Delete all local data")}
+              {t("この端末のデータを削除", "Delete data on this device")}
             </button>
           </div>
+          <details class="mt-5 border-t border-slate-200 pt-4">
+            <summary class="cursor-pointer text-sm font-semibold text-slate-600">
+              {t("詳細な書き出し", "Advanced export")}
+            </summary>
+            <p class="mt-3 text-xs leading-6 text-slate-500">
+              {t(
+                "論文情報だけを軽量なJSONファイルとして保存します。PDF本体は含まれません。",
+                "Save paper information as a small JSON file. PDF files are not included.",
+              )}
+            </p>
+            <button type="button" class="button mt-3" onClick$={exportData}>
+              <Icon name="Download" size={16} />
+              {t("論文情報を書き出す", "Export paper information")}
+            </button>
+          </details>
         </section>
         <div class="settings-action-bar flex items-center justify-end gap-4">
           <span class="text-sm text-emerald-700" role="status">

@@ -119,6 +119,7 @@ export default component$(() => {
   const totalPages = useSignal(0);
   const fitMode = useSignal<PdfFitMode>();
   const fitVersion = useSignal(0);
+  const providerConnected = useSignal(false);
   const requestedPage = (() => {
     const raw = location.url.searchParams.get("page");
     if (!raw || !/^[1-9]\d*$/.test(raw)) return undefined;
@@ -133,6 +134,8 @@ export default component$(() => {
     }),
   );
 
+  // Papers and PDF blobs are loaded from browser storage.
+  // eslint-disable-next-line qwik/no-use-visible-task
   useVisibleTask$(async () => {
     if (window.matchMedia("(max-width: 639px)").matches)
       showThumbnails.value = false;
@@ -146,6 +149,10 @@ export default component$(() => {
       const initialLanguage =
         getSessionProvider()?.targetLanguage ||
         configuredProvider.targetLanguage;
+      providerConnected.value =
+        getSessionProvider()?.mode === configuredProvider.mode
+          ? !!getSessionProvider()?.connected
+          : configuredProvider.connected;
       if (isSupportedLanguage(initialLanguage))
         language.value = initialLanguage;
       const storedPageCount = Math.max(
@@ -286,6 +293,8 @@ export default component$(() => {
     layout.value = value;
     void persistReader(page.value, zoom.value, viewMode.value, value);
   });
+  // Autosave is a browser timer around local persistence.
+  // eslint-disable-next-line qwik/no-use-visible-task
   useVisibleTask$(({ track, cleanup }) => {
     const current = track(() => dirty.value);
     const baseline = track(() => saved.value);
@@ -360,11 +369,15 @@ export default component$(() => {
       };
       let translated = "";
       let segments: TranslationSegmentResult[] | undefined;
+      if (!settings.connected)
+        throw new Error(
+          localize(
+            locale.value,
+            "設定画面でAI接続を確認してください。",
+            "Check your AI connection in Settings.",
+          ),
+        );
       if (settings.mode === "paperlens-managed") {
-        if (!settings.connected)
-          throw new Error(
-            "LLM画面でPaperLens管理LLMへの接続確認を完了してください。",
-          );
         const request: TranslationRequest = {
           documentId: id,
           sourceLanguage: "auto",
@@ -785,7 +798,10 @@ export default component$(() => {
             <button
               type="button"
               class="viewer-panel-button px-2 md:px-2.5"
-              disabled={!file.value?.textByPage?.[page.value]?.trim()}
+              disabled={
+                !providerConnected.value ||
+                !file.value?.textByPage?.[page.value]?.trim()
+              }
               aria-label={t("このページを翻訳", "Translate page")}
               title={t("このページを翻訳", "Translate page")}
               onClick$={translateCurrentPage}
@@ -795,6 +811,26 @@ export default component$(() => {
                 {t("このページを翻訳", "Translate page")}
               </span>
             </button>
+            <Link
+              href="/settings/#ai-connection"
+              class={`viewer-icon-button-light relative ${providerConnected.value ? "text-emerald-700" : "text-amber-700"}`}
+              aria-label={
+                providerConnected.value
+                  ? t("AI接続済み。設定を開く", "AI connected. Open settings")
+                  : t("AI未接続。設定を開く", "AI not connected. Open settings")
+              }
+              title={
+                providerConnected.value
+                  ? t("AI接続済み", "AI connected")
+                  : t("AI接続を設定", "Configure AI")
+              }
+            >
+              <Icon name="Settings2" size={17} />
+              <span
+                class={`absolute right-1 top-1 size-2 ${providerConnected.value ? "bg-emerald-500" : "bg-amber-400"}`}
+                aria-hidden="true"
+              />
+            </Link>
             <select
               class="viewer-panel-select"
               aria-label={t("翻訳言語", "Translation language")}

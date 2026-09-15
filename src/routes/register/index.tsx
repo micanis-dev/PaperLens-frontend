@@ -25,6 +25,8 @@ export default component$(() => {
   const password = useSignal("");
   const busy = useSignal(false);
   const error = useSignal("");
+  // Registration preferences are stored in the browser.
+  // eslint-disable-next-line qwik/no-use-visible-task
   useVisibleTask$(async () => {
     try {
       locale.value =

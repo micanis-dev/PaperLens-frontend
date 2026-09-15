@@ -54,7 +54,7 @@ export async function importBackupZip(file: File) {
   if (!manifestBytes) throw new Error("バックアップのmanifest.jsonがありません。");
   let manifest: { schemaVersion?: number; paperIds?: unknown[] };
   try { manifest = JSON.parse(strFromU8(manifestBytes)) as typeof manifest; } catch { throw new Error("バックアップのmanifest.jsonが不正です。"); }
-  if (manifest.schemaVersion !== 1 || !Array.isArray(manifest.paperIds) || manifest.paperIds.some((id) => typeof id !== "string")) throw new Error("バックアップのスキーマバージョンが未対応です。");
+  if (manifest.schemaVersion !== 1 || !Array.isArray(manifest.paperIds) || manifest.paperIds.some((id) => typeof id !== "string")) throw new Error("このバックアップ形式には対応していません。新しいPaperLensで作成されたファイルか確認してください。");
   const paperEntries = Object.entries(entries).filter(([path]) => /^papers\/[^/.]+\.json$/.test(path));
   if (paperEntries.length !== manifest.paperIds.length || new Set(manifest.paperIds as string[]).size !== paperEntries.length) throw new Error("バックアップの論文一覧が不整合です。");
   const bundles: PaperBundle[] = [];

@@ -93,6 +93,14 @@ svg {
   transform-origin: 0 0;
 }
 
+/* Give unrendered pages real geometry. Without a placeholder every page starts
+   at zero height and a long document can enter the observer viewport at once. */
+.pdf-page-placeholder:not([data-rendered="true"]) {
+  width: min(48rem, calc(100vw - 3rem));
+  min-height: min(64rem, calc((100vw - 3rem) * 4 / 3));
+  aspect-ratio: 3 / 4;
+}
+
 .pdf-reader:fullscreen {
   width: 100vw;
   height: 100vh;

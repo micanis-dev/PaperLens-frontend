@@ -91,6 +91,8 @@ export default component$(() => {
   const renderTick = useSignal(0);
   const fileRefs = useSignal(noSerialize(new Map<string, File>()));
   const uploadMounted = useSignal(true);
+  // File references exist only for the lifetime of the browser view.
+  // eslint-disable-next-line qwik/no-use-visible-task
   useVisibleTask$(({ cleanup }) => {
     cleanup(() => {
       uploadMounted.value = false;

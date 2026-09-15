@@ -2,7 +2,6 @@ import {
   $,
   component$,
   Slot,
-  useOnWindow,
   useSignal,
   useVisibleTask$,
 } from "@builder.io/qwik";
@@ -30,6 +29,8 @@ export const OpenTabs = component$<{ variant?: "shell" | "reader" }>(
     const location = useLocation();
     const navigate = useNavigate();
     const tabs = useSignal<{ id: string; title: string }[]>([]);
+    // Open tabs are stored only in the browser.
+    // eslint-disable-next-line qwik/no-use-visible-task
     useVisibleTask$(({ track, cleanup }) => {
       track(() => location.url.href);
       let disposed = false;
@@ -62,9 +63,11 @@ export const OpenTabs = component$<{ variant?: "shell" | "reader" }>(
         }
       })();
     });
-    useOnWindow(
-      "keydown",
-      $((event) => {
+    // A native listener prevents the browser shortcut synchronously; a lazy
+    // QRL handler cannot reliably call preventDefault after it is resumed.
+    // eslint-disable-next-line qwik/no-use-visible-task
+    useVisibleTask$(({ cleanup }) => {
+      const handleKeydown = (event: KeyboardEvent) => {
         if (
           !(event.metaKey || event.ctrlKey) ||
           !event.shiftKey ||
@@ -88,8 +91,10 @@ export const OpenTabs = component$<{ variant?: "shell" | "reader" }>(
         const nextIndex =
           (currentIndex + offset + tabs.value.length) % tabs.value.length;
         void navigate(`/papers/${tabs.value[nextIndex].id}/`);
-      }),
-    );
+      };
+      window.addEventListener("keydown", handleKeydown);
+      cleanup(() => window.removeEventListener("keydown", handleKeydown));
+    });
     const close = $(async (id: string) => {
       tabs.value = tabs.value.filter((tab) => tab.id !== id);
       try {
@@ -185,12 +190,14 @@ const QuickSwitcher = component$(() => {
       });
     }
   });
+  // Quick-switcher data is browser-local.
+  // eslint-disable-next-line qwik/no-use-visible-task
   useVisibleTask$(() => {
     void loadCandidates();
   });
-  useOnWindow(
-    "keydown",
-    $((event) => {
+  // eslint-disable-next-line qwik/no-use-visible-task
+  useVisibleTask$(({ cleanup }) => {
+    const handleKeydown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         open.value = true;
@@ -198,8 +205,10 @@ const QuickSwitcher = component$(() => {
         void loadCandidates();
       }
       if (event.key === "Escape") open.value = false;
-    }),
-  );
+    };
+    window.addEventListener("keydown", handleKeydown);
+    cleanup(() => window.removeEventListener("keydown", handleKeydown));
+  });
   const routes = [
     {
       title: message(locale.value, "library"),
@@ -211,12 +220,6 @@ const QuickSwitcher = component$(() => {
       title: message(locale.value, "addPaper"),
       href: "/upload/",
       searchText: normalizeSwitcherText(message(locale.value, "addPaper")),
-      category: "screen" as const,
-    },
-    {
-      title: message(locale.value, "llmOperations"),
-      href: "/llm/",
-      searchText: normalizeSwitcherText(message(locale.value, "llmOperations")),
       category: "screen" as const,
     },
     {
@@ -318,7 +321,6 @@ const QuickSwitcher = component$(() => {
 
 const navigation = (locale: Locale) => [
   { label: message(locale, "allPapers"), href: "/", icon: "Library" as const },
-  { label: message(locale, "llm"), href: "/llm/", icon: "Sparkles" as const },
   {
     label: message(locale, "billing"),
     href: "/billing/",
@@ -328,7 +330,7 @@ const navigation = (locale: Locale) => [
 
 const sectionTitle = (pathname: string, locale: Locale) => {
   if (pathname.startsWith("/upload")) return message(locale, "addPaper");
-  if (pathname.startsWith("/llm")) return message(locale, "llmOperations");
+  if (pathname.startsWith("/llm")) return message(locale, "llm");
   if (pathname.startsWith("/billing")) return message(locale, "billing");
   if (pathname.startsWith("/settings")) return message(locale, "settings");
   if (pathname.startsWith("/papers")) return message(locale, "reading");

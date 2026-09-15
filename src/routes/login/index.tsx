@@ -19,6 +19,8 @@ import { localize, type Locale } from "~/lib/i18n";
 
 export default component$(() => {
   const locale = useSignal<Locale>("ja");
+  // Login preferences are stored in the browser.
+  // eslint-disable-next-line qwik/no-use-visible-task
   useVisibleTask$(async () => {
     try {
       locale.value =
@@ -78,6 +80,8 @@ export default component$(() => {
       testUserBusy.value = "";
     }
   });
+  // Complete the browser redirect after hydration.
+  // eslint-disable-next-line qwik/no-use-visible-task
   useVisibleTask$(async () => {
     if (!isDev) return;
     try {
