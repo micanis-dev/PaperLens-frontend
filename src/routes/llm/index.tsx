@@ -231,13 +231,30 @@ export default component$(() => {
     }
   });
   const saveSettings = $(async () => {
+    if (busy.value) return;
+    const previous = { ...settings.value };
     const withoutKey = { ...settings.value, connected: false };
     delete withoutKey.apiKey;
     delete withoutKey.checkedAt;
+    busy.value = "save";
     settings.value = withoutKey;
-    await saveSetting("provider", withoutKey);
-    message.value =
-      "設定を保存しました。APIキーは保存せず、このセッション中だけ使用します。接続確認を実行してください。";
+    try {
+      await saveSetting("provider", withoutKey);
+      message.value =
+        "設定を保存しました。APIキーは保存せず、このセッション中だけ使用します。接続確認を実行してください。";
+    } catch (error) {
+      const restored = { ...previous };
+      delete restored.apiKey;
+      settings.value = restored;
+      const detail = error instanceof Error ? ` ${error.message}` : "";
+      message.value = localize(
+        locale.value,
+        `設定を保存できませんでした。読み取り専用状態または保存容量を確認してください。${detail}`,
+        `Could not save settings. Check whether browser storage is read-only or full.${detail}`,
+      );
+    } finally {
+      busy.value = "";
+    }
   });
   const connect = $(async () => {
     busy.value = "connect";
@@ -359,7 +376,17 @@ export default component$(() => {
       tags: [...new Set([...paper.tags, ...candidates.value].filter(Boolean))],
       updatedAt: new Date().toISOString(),
     };
-    await savePaper(updated);
+    try {
+      await savePaper(updated);
+    } catch (error) {
+      const detail = error instanceof Error ? ` ${error.message}` : "";
+      message.value = localize(
+        locale.value,
+        `タグを保存できませんでした。候補は保持していますので、再試行できます。${detail}`,
+        `Could not save the tags. The candidates were kept so you can retry.${detail}`,
+      );
+      return;
+    }
     papers.value = papers.value.map((item) =>
       item.id === paper.id ? updated : item,
     );

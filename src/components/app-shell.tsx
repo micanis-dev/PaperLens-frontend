@@ -9,131 +9,184 @@ import {
 import { Link, useLocation, useNavigate } from "@builder.io/qwik-city";
 import { Icon } from "~/components/icon";
 import { cn } from "~/lib/utils";
-import { getPaper, getSetting, saveSetting } from "~/lib/storage";
+import { getPaper, getSetting, listPapers, saveSetting } from "~/lib/storage";
 import { message, type Locale, useLocale } from "~/lib/i18n";
 
-const OpenTabs = component$(() => {
-  const locale = useLocale();
-  const location = useLocation();
-  const navigate = useNavigate();
-  const tabs = useSignal<{ id: string; title: string }[]>([]);
-  useVisibleTask$(({ track, cleanup }) => {
-    track(() => location.url.href);
-    let disposed = false;
-    cleanup(() => {
-      disposed = true;
+type SwitcherPaper = { id: string; title: string; searchText: string };
+type SwitcherCategory = "screen" | "open" | "paper";
+type SwitcherResult = {
+  title: string;
+  href: string;
+  searchText: string;
+  category: SwitcherCategory;
+};
+
+const normalizeSwitcherText = (value: string) =>
+  value.trim().toLocaleLowerCase();
+
+export const OpenTabs = component$<{ variant?: "shell" | "reader" }>(
+  ({ variant = "shell" }) => {
+    const locale = useLocale();
+    const location = useLocation();
+    const navigate = useNavigate();
+    const tabs = useSignal<{ id: string; title: string }[]>([]);
+    useVisibleTask$(({ track, cleanup }) => {
+      track(() => location.url.href);
+      let disposed = false;
+      cleanup(() => {
+        disposed = true;
+      });
+      void (async () => {
+        let storedTabs: { id: string; title: string }[];
+        try {
+          storedTabs = await getSetting("openTabs", []);
+        } catch {
+          return;
+        }
+        if (disposed) return;
+        const id = location.params.id;
+        if (!id) {
+          tabs.value = storedTabs;
+          return;
+        }
+        const paper = await getPaper(id);
+        if (disposed || !paper) return;
+        tabs.value = [
+          { id, title: paper.title || paper.fileName },
+          ...storedTabs.filter((tab) => tab.id !== id),
+        ].slice(0, 8);
+        try {
+          await saveSetting("openTabs", tabs.value);
+        } catch {
+          /* read-only migration mode still permits reading */
+        }
+      })();
     });
-    void (async () => {
-      let storedTabs: { id: string; title: string }[];
-      try {
-        storedTabs = await getSetting("openTabs", []);
-      } catch {
-        return;
-      }
-      if (disposed) return;
-      const id = location.params.id;
-      if (!id) {
-        tabs.value = storedTabs;
-        return;
-      }
-      const paper = await getPaper(id);
-      if (disposed || !paper) return;
-      tabs.value = [
-        { id, title: paper.title || paper.fileName },
-        ...storedTabs.filter((tab) => tab.id !== id),
-      ].slice(0, 8);
+    useOnWindow(
+      "keydown",
+      $((event) => {
+        if (
+          !(event.metaKey || event.ctrlKey) ||
+          !event.shiftKey ||
+          !["ArrowLeft", "ArrowRight"].includes(event.key)
+        )
+          return;
+        const target = event.target as HTMLElement | null;
+        if (
+          target?.tagName === "INPUT" ||
+          target?.tagName === "TEXTAREA" ||
+          target?.isContentEditable ||
+          tabs.value.length < 2
+        )
+          return;
+        const currentIndex = tabs.value.findIndex(
+          (tab) => tab.id === location.params.id,
+        );
+        if (currentIndex < 0) return;
+        event.preventDefault();
+        const offset = event.key === "ArrowRight" ? 1 : -1;
+        const nextIndex =
+          (currentIndex + offset + tabs.value.length) % tabs.value.length;
+        void navigate(`/papers/${tabs.value[nextIndex].id}/`);
+      }),
+    );
+    const close = $(async (id: string) => {
+      tabs.value = tabs.value.filter((tab) => tab.id !== id);
       try {
         await saveSetting("openTabs", tabs.value);
       } catch {
-        /* read-only migration mode still permits reading */
+        /* keep the in-memory tab state */
       }
-    })();
-  });
-  useOnWindow(
-    "keydown",
-    $((event) => {
-      if (
-        !(event.metaKey || event.ctrlKey) ||
-        !event.shiftKey ||
-        !["ArrowLeft", "ArrowRight"].includes(event.key)
-      )
-        return;
-      const target = event.target as HTMLElement | null;
-      if (
-        target?.tagName === "INPUT" ||
-        target?.tagName === "TEXTAREA" ||
-        target?.isContentEditable ||
-        tabs.value.length < 2
-      )
-        return;
-      const currentIndex = tabs.value.findIndex(
-        (tab) => tab.id === location.params.id,
-      );
-      if (currentIndex < 0) return;
-      event.preventDefault();
-      const offset = event.key === "ArrowRight" ? 1 : -1;
-      const nextIndex =
-        (currentIndex + offset + tabs.value.length) % tabs.value.length;
-      void navigate(`/papers/${tabs.value[nextIndex].id}/`);
-    }),
-  );
-  const close = $(async (id: string) => {
-    tabs.value = tabs.value.filter((tab) => tab.id !== id);
-    try {
-      await saveSetting("openTabs", tabs.value);
-    } catch {
-      /* keep the in-memory tab state */
-    }
-  });
-  if (!tabs.value.length) return null;
-  return (
-    <nav
-      aria-label={locale.value === "en" ? "Open papers" : "開いている論文"}
-      class="flex gap-1 overflow-x-auto border-b border-slate-200 bg-white px-5 sm:px-8"
-    >
-      <span class="shrink-0 py-3 text-xs font-semibold text-slate-400">
-        {message(locale.value, "tabs")}
-      </span>
-      {tabs.value.map((tab) => (
-        <div
-          key={tab.id}
-          class="flex shrink-0 items-center border-l border-slate-200"
+    });
+    if (!tabs.value.length) return null;
+    return (
+      <nav
+        aria-label={locale.value === "en" ? "Open papers" : "開いている論文"}
+        class={
+          variant === "reader"
+            ? "flex shrink-0 gap-1 overflow-x-auto border-b border-white/10 bg-[#3a3e41] px-2"
+            : "flex gap-1 overflow-x-auto border-b border-slate-200 bg-white px-5 sm:px-8"
+        }
+      >
+        <span
+          class={
+            variant === "reader"
+              ? "shrink-0 py-1.5 text-[10px] font-semibold text-white/45"
+              : "shrink-0 py-3 text-xs font-semibold text-slate-400"
+          }
         >
-          <Link
-            href={`/papers/${tab.id}/`}
+          {message(locale.value, "tabs")}
+        </span>
+        {tabs.value.map((tab) => (
+          <div
+            key={tab.id}
             class={
-              location.params.id === tab.id
-                ? "border-b-2 border-sky-400 px-3 py-3 text-xs font-semibold text-slate-950"
-                : "px-3 py-3 text-xs text-slate-500 hover:text-slate-950"
+              variant === "reader"
+                ? "flex shrink-0 items-center border-l border-white/10"
+                : "flex shrink-0 items-center border-l border-slate-200"
             }
           >
-            {tab.title}
-          </Link>
-          <button
-            type="button"
-            aria-label={`${tab.title} ${message(locale.value, "close")}`}
-            class="flex size-8 items-center justify-center text-slate-400 hover:text-slate-950"
-            onClick$={() => close(tab.id)}
-          >
-            <Icon name="X" size={13} />
-          </button>
-        </div>
-      ))}
-    </nav>
-  );
-});
+            <Link
+              href={`/papers/${tab.id}/`}
+              class={
+                location.params.id === tab.id
+                  ? variant === "reader"
+                    ? "border-b-2 border-sky-300 px-2.5 py-1.5 text-[11px] font-semibold text-white"
+                    : "border-b-2 border-sky-400 px-3 py-3 text-xs font-semibold text-slate-950"
+                  : variant === "reader"
+                    ? "px-2.5 py-1.5 text-[11px] text-white/55 hover:text-white"
+                    : "px-3 py-3 text-xs text-slate-500 hover:text-slate-950"
+              }
+              aria-current={location.params.id === tab.id ? "page" : undefined}
+            >
+              {tab.title}
+            </Link>
+            <button
+              type="button"
+              aria-label={`${tab.title} ${message(locale.value, "close")}`}
+              class={
+                variant === "reader"
+                  ? "flex size-7 items-center justify-center text-white/40 hover:text-white"
+                  : "flex size-8 items-center justify-center text-slate-400 hover:text-slate-950"
+              }
+              onClick$={() => close(tab.id)}
+            >
+              <Icon name="X" size={13} />
+            </button>
+          </div>
+        ))}
+      </nav>
+    );
+  },
+);
 
 const QuickSwitcher = component$(() => {
   const locale = useLocale();
   const open = useSignal(false);
   const query = useSignal("");
   const tabs = useSignal<{ id: string; title: string }[]>([]);
-  useVisibleTask$(async () => {
-    try {
-      tabs.value = await getSetting("openTabs", []);
-    } catch {
-      /* storage is optional for navigation */
+  const papers = useSignal<SwitcherPaper[]>([]);
+  const loadCandidates = $(async () => {
+    const [tabsResult, papersResult] = await Promise.allSettled([
+      getSetting("openTabs", []),
+      listPapers(),
+    ]);
+    if (tabsResult.status === "fulfilled") tabs.value = tabsResult.value;
+    if (papersResult.status === "fulfilled") {
+      papers.value = papersResult.value.map((paper) => {
+        const title = paper.title || paper.fileName;
+        return {
+          id: paper.id,
+          title,
+          searchText: normalizeSwitcherText(
+            [title, paper.fileName, ...paper.authors, ...paper.tags].join(" "),
+          ),
+        };
+      });
     }
+  });
+  useVisibleTask$(() => {
+    void loadCandidates();
   });
   useOnWindow(
     "keydown",
@@ -142,29 +195,59 @@ const QuickSwitcher = component$(() => {
         event.preventDefault();
         open.value = true;
         query.value = "";
-        void getSetting("openTabs", [])
-          .then((next) => {
-            tabs.value = next;
-          })
-          .catch(() => undefined);
+        void loadCandidates();
       }
       if (event.key === "Escape") open.value = false;
     }),
   );
   const routes = [
-    { title: message(locale.value, "library"), href: "/" },
-    { title: message(locale.value, "addPaper"), href: "/upload/" },
-    { title: message(locale.value, "llmOperations"), href: "/llm/" },
-    { title: message(locale.value, "settings"), href: "/settings/" },
+    {
+      title: message(locale.value, "library"),
+      href: "/",
+      searchText: normalizeSwitcherText(message(locale.value, "library")),
+      category: "screen" as const,
+    },
+    {
+      title: message(locale.value, "addPaper"),
+      href: "/upload/",
+      searchText: normalizeSwitcherText(message(locale.value, "addPaper")),
+      category: "screen" as const,
+    },
+    {
+      title: message(locale.value, "llmOperations"),
+      href: "/llm/",
+      searchText: normalizeSwitcherText(message(locale.value, "llmOperations")),
+      category: "screen" as const,
+    },
+    {
+      title: message(locale.value, "settings"),
+      href: "/settings/",
+      searchText: normalizeSwitcherText(message(locale.value, "settings")),
+      category: "screen" as const,
+    },
   ];
-  const needle = query.value.trim().toLowerCase();
-  const results = [
-    ...routes,
-    ...tabs.value.map((tab) => ({
+  const openIDs = new Set(tabs.value.map((tab) => tab.id));
+  const openPaperResults: SwitcherResult[] = tabs.value.map((tab) => {
+    const paper = papers.value.find((item) => item.id === tab.id);
+    return {
       title: tab.title,
       href: `/papers/${tab.id}/`,
-    })),
-  ].filter((item) => !needle || item.title.toLowerCase().includes(needle));
+      searchText: paper?.searchText || normalizeSwitcherText(tab.title),
+      category: "open",
+    };
+  });
+  const libraryResults: SwitcherResult[] = papers.value
+    .filter((paper) => !openIDs.has(paper.id))
+    .map((paper) => ({
+      title: paper.title,
+      href: `/papers/${paper.id}/`,
+      searchText: paper.searchText,
+      category: "paper",
+    }));
+  const needle = normalizeSwitcherText(query.value);
+  const results = [...routes, ...openPaperResults, ...libraryResults]
+    .filter((item) => !needle || item.searchText.includes(needle))
+    .slice(0, 40);
   if (!open.value) return null;
   return (
     <div
@@ -200,10 +283,23 @@ const QuickSwitcher = component$(() => {
               <Link
                 key={item.href}
                 href={item.href}
-                class="block border-l-2 border-transparent px-3 py-3 text-sm hover:border-sky-400 hover:bg-sky-50"
+                class="flex items-center gap-3 border-l-2 border-transparent px-3 py-3 text-sm hover:border-sky-400 hover:bg-sky-50"
                 onClick$={() => (open.value = false)}
               >
-                {item.title}
+                <span class="min-w-0 flex-1 truncate">{item.title}</span>
+                <span class="shrink-0 text-[10px] text-slate-400">
+                  {item.category === "screen"
+                    ? locale.value === "en"
+                      ? "Screen"
+                      : "画面"
+                    : item.category === "open"
+                      ? locale.value === "en"
+                        ? "Open"
+                        : "開いている論文"
+                      : locale.value === "en"
+                        ? "Paper"
+                        : "論文"}
+                </span>
               </Link>
             ))
           ) : (

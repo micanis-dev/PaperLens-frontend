@@ -354,6 +354,12 @@ export const PdfReader = component$<Props>(
           searchInput.value?.focus();
           return;
         }
+        if (
+          (event.metaKey || event.ctrlKey) &&
+          event.shiftKey &&
+          (event.key === "ArrowLeft" || event.key === "ArrowRight")
+        )
+          return;
         if (editing) return;
         if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
           event.preventDefault();

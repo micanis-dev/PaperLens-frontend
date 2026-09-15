@@ -1,11 +1,26 @@
-const CACHE_NAME = "paperlens-shell-v1";
+const CACHE_NAME = "paperlens-shell-v2";
+const CACHE_PREFIX = "paperlens-shell-";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    caches
+      .keys()
+      .then((cacheNames) =>
+        Promise.all(
+          cacheNames
+            .filter(
+              (cacheName) =>
+                cacheName.startsWith(CACHE_PREFIX) && cacheName !== CACHE_NAME,
+            )
+            .map((cacheName) => caches.delete(cacheName)),
+        ),
+      )
+      .then(() => self.clients.claim()),
+  );
 });
 
 self.addEventListener("fetch", (event) => {

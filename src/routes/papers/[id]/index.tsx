@@ -8,6 +8,7 @@ import {
 } from "@builder.io/qwik";
 import { Link, type DocumentHead, useLocation } from "@builder.io/qwik-city";
 import { Icon } from "~/components/icon";
+import { OpenTabs } from "~/components/app-shell";
 import {
   PdfReader,
   type AnnotationDraft,
@@ -118,6 +119,12 @@ export default component$(() => {
   const totalPages = useSignal(0);
   const fitMode = useSignal<PdfFitMode>();
   const fitVersion = useSignal(0);
+  const requestedPage = (() => {
+    const raw = location.url.searchParams.get("page");
+    if (!raw || !/^[1-9]\d*$/.test(raw)) return undefined;
+    const value = Number(raw);
+    return Number.isSafeInteger(value) ? value : undefined;
+  })();
 
   useOnDocument(
     "fullscreenchange",
@@ -130,11 +137,17 @@ export default component$(() => {
     if (window.matchMedia("(max-width: 639px)").matches)
       showThumbnails.value = false;
     try {
-      const [loaded, loadedFile] = await Promise.all([
+      const [loaded, loadedFile, configuredProvider] = await Promise.all([
         getPaper(id),
         getPaperFile(id),
+        getSetting("provider", defaultProvider),
       ]);
       if (!loaded || !loadedFile) throw new Error("論文が見つかりません。");
+      const initialLanguage =
+        getSessionProvider()?.targetLanguage ||
+        configuredProvider.targetLanguage;
+      if (isSupportedLanguage(initialLanguage))
+        language.value = initialLanguage;
       const storedPageCount = Math.max(
         0,
         ...Object.keys(loadedFile.textByPage || {}).map(Number),
@@ -144,10 +157,11 @@ export default component$(() => {
       file.value = noSerialize(loadedFile);
       page.value = Math.max(
         1,
-        Math.min(
-          storedPageCount || Number.MAX_SAFE_INTEGER,
-          loaded.reader?.page || 1,
-        ),
+        requestedPage ||
+          Math.min(
+            storedPageCount || Number.MAX_SAFE_INTEGER,
+            loaded.reader?.page || 1,
+          ),
       );
       zoom.value = loaded.reader?.zoom || 1;
       viewMode.value = loaded.reader?.viewMode || "continuous";
@@ -296,7 +310,16 @@ export default component$(() => {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    await saveAnnotation(item);
+    try {
+      await saveAnnotation(item);
+    } catch {
+      saveState.value = localize(
+        locale.value,
+        "注釈を保存できませんでした。ブラウザの保存領域を確認して再試行してください。",
+        "Could not save the annotation. Check browser storage and try again.",
+      );
+      return;
+    }
     annotations.value = [item, ...annotations.value];
     saveState.value = `${draft.pageNumber}ページの${draft.type === "highlight" ? "ハイライト" : draft.type === "underline" ? "下線" : "コメント"}を保存しました`;
   });
@@ -311,6 +334,13 @@ export default component$(() => {
       sessionSettings?.mode === storedSettings.mode
         ? sessionSettings
         : storedSettings;
+    const targetLanguage = language.value;
+    if (!isSupportedLanguage(targetLanguage)) {
+      saveState.value =
+        "リーダーの翻訳言語が未対応です。翻訳言語を選び直してください。";
+      return;
+    }
+    const translationSettings = { ...settings, targetLanguage };
     if (layout.value === "pdf") {
       layout.value = "split";
       void persistReader(page.value, zoom.value, viewMode.value, "split");
@@ -319,10 +349,6 @@ export default component$(() => {
     const controller = new AbortController();
     readerTranslationController.value = noSerialize(controller);
     try {
-      if (!isSupportedLanguage(settings.targetLanguage))
-        throw new Error(
-          "対応していない翻訳先言語です。設定を確認してください。",
-        );
       const text = draft.quote.slice(0, 20_000);
       const textHash = await hashText(text);
       const segment = {
@@ -342,7 +368,7 @@ export default component$(() => {
         const request: TranslationRequest = {
           documentId: id,
           sourceLanguage: "auto",
-          targetLanguage: settings.targetLanguage,
+          targetLanguage,
           model: settings.model,
           segments: [segment],
           preserveFormatting: true,
@@ -393,7 +419,11 @@ export default component$(() => {
           );
           return;
         }
-        translated = await translateText(settings, text, controller.signal);
+        translated = await translateText(
+          translationSettings,
+          text,
+          controller.signal,
+        );
         segments = [
           {
             id: segment.id,
@@ -408,7 +438,7 @@ export default component$(() => {
       const item: Translation = {
         id: crypto.randomUUID(),
         documentId: id,
-        language: settings.targetLanguage,
+        language: targetLanguage,
         markdown: translated,
         source: "llm",
         updatedAt: new Date().toISOString(),
@@ -516,6 +546,7 @@ export default component$(() => {
       ref={viewerRoot}
       class="flex h-screen min-h-0 w-full flex-col overflow-hidden bg-[#525659] text-slate-900"
     >
+      <OpenTabs variant="reader" />
       <header class="paper-viewer-toolbar flex h-14 shrink-0 items-center gap-1 bg-[#323639] px-2 text-white shadow-md sm:gap-2 sm:px-3">
         <div class="flex min-w-0 flex-1 items-center gap-1 sm:gap-2">
           <Link
@@ -717,7 +748,10 @@ export default component$(() => {
             showThumbnails={showThumbnails.value}
             fitMode={fitMode.value}
             fitVersion={fitVersion.value}
-            onPages$={$((count: number) => (totalPages.value = count))}
+            onPages$={$((count: number) => {
+              totalPages.value = count;
+              if (page.value > count) void updatePage(count);
+            })}
             onPage$={updatePage}
             onZoom$={updateZoom}
             onAnnotate$={addAnnotation}

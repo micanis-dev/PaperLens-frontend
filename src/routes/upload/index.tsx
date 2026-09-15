@@ -1,4 +1,11 @@
-import { component$, $, useSignal, useStore } from "@builder.io/qwik";
+import {
+  $,
+  component$,
+  noSerialize,
+  useSignal,
+  useStore,
+  useVisibleTask$,
+} from "@builder.io/qwik";
 import { Link, type DocumentHead, useNavigate } from "@builder.io/qwik-city";
 import { AppShell } from "~/components/app-shell";
 import { Icon } from "~/components/icon";
@@ -26,8 +33,6 @@ type UploadItem = {
   done: boolean;
   skipped?: boolean;
 };
-const fileRefs = new Map<string, File>();
-
 const validatePaper = (paper: PaperDocument, english: boolean) => {
   const errors: UploadItem["fieldErrors"] = {};
   if (!paper.title.trim())
@@ -84,6 +89,14 @@ export default component$(() => {
   const notice = useSignal("");
   const noticeIsError = useSignal(false);
   const renderTick = useSignal(0);
+  const fileRefs = useSignal(noSerialize(new Map<string, File>()));
+  const uploadMounted = useSignal(true);
+  useVisibleTask$(({ cleanup }) => {
+    cleanup(() => {
+      uploadMounted.value = false;
+      fileRefs.value?.clear();
+    });
+  });
   const addFiles = $(async (selected: File[]) => {
     if (busy.value) return;
     notice.value = "";
@@ -119,6 +132,7 @@ export default component$(() => {
         ...items.map((item) => item.hash).filter(Boolean),
       ]);
       for (const file of selected) {
+        if (!uploadMounted.value) return;
         const inspection = {
           title: "",
           author: "",
@@ -127,7 +141,7 @@ export default component$(() => {
           textByPage: {} as Record<number, string>,
         };
         const paper = emptyPaper(file, inspection);
-        fileRefs.set(paper.id, file);
+        fileRefs.value?.set(paper.id, file);
         const item: UploadItem = {
           id: paper.id,
           fileName: file.name,
@@ -168,6 +182,7 @@ export default component$(() => {
           item.progress = 100;
           item.state = item.duplicate ? "重複の可能性" : "確認待ち";
         } catch (error) {
+          fileRefs.value?.delete(item.id);
           item.state = "登録不可";
           item.error =
             error instanceof Error
@@ -211,7 +226,7 @@ export default component$(() => {
       busy.value = true;
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
-        const file = fileRefs.get(item.id);
+        const file = fileRefs.value?.get(item.id);
         if (item.done || item.skipped || item.duplicate || item.error || !file)
           continue;
         try {
@@ -221,8 +236,10 @@ export default component$(() => {
             sha256: item.hash,
             textByPage: item.textByPage,
           });
+          fileRefs.value?.delete(item.id);
           items.splice(i, 1, { ...item, state: "登録済み", done: true });
         } catch (error) {
+          fileRefs.value?.delete(item.id);
           items.splice(i, 1, {
             ...item,
             state: "保存失敗",
@@ -248,6 +265,7 @@ export default component$(() => {
     const force = target.dataset.uploadAction === "force";
     if (target.dataset.uploadAction === "skip") {
       if (item) {
+        fileRefs.value?.delete(item.id);
         item.skipped = true;
         item.done = true;
         item.state = "スキップ";
@@ -267,7 +285,7 @@ export default component$(() => {
       renderTick.value++;
       return;
     }
-    const file = fileRefs.get(item.id);
+    const file = fileRefs.value?.get(item.id);
     if (!file) {
       item.state = "保存不可";
       item.error =
@@ -284,6 +302,7 @@ export default component$(() => {
         sha256: item.hash,
         textByPage: item.textByPage,
       });
+      fileRefs.value?.delete(item.id);
       items.splice(index, 1, { ...item, state: "登録済み", done: true });
       renderTick.value++;
       noticeIsError.value = false;
@@ -293,6 +312,7 @@ export default component$(() => {
         "Paper registered",
       );
     } catch (error) {
+      fileRefs.value?.delete(item.id);
       const message =
         error instanceof Error ? error.message : "保存できませんでした";
       items.splice(index, 1, { ...item, state: "保存失敗", error: message });
@@ -334,6 +354,7 @@ export default component$(() => {
             disabled={busy.value}
             onChange$={async (_, target) => {
               if (target.files) await addFiles(Array.from(target.files));
+              target.value = "";
             }}
           />
           <span class="flex size-12 items-center justify-center bg-sky-100 text-sky-700">

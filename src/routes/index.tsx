@@ -15,7 +15,7 @@ import {
   type SearchDocument,
   type SearchIndexEntry,
 } from "~/lib/search";
-import { message, useLocale } from "~/lib/i18n";
+import { localize, message, useLocale } from "~/lib/i18n";
 
 const formatDate = (date: string | undefined, locale: "ja" | "en") =>
   date
@@ -59,6 +59,7 @@ export default component$(() => {
   const loading = useSignal(true);
   const error = useSignal("");
   const searchIndex = useSignal<SearchIndexEntry[]>([]);
+  const pendingPaperWrites = useSignal<Record<string, boolean>>({});
 
   const reload = $(async () => {
     try {
@@ -121,6 +122,11 @@ export default component$(() => {
   });
   const updatePaper = $(
     async (paper: PaperDocument, patch: Partial<PaperDocument>) => {
+      if (pendingPaperWrites.value[paper.id]) return;
+      pendingPaperWrites.value = {
+        ...pendingPaperWrites.value,
+        [paper.id]: true,
+      };
       const updated = {
         ...paper,
         ...patch,
@@ -129,7 +135,24 @@ export default component$(() => {
       papers.value = papers.value.map((item) =>
         item.id === paper.id ? updated : item,
       );
-      await savePaper(updated);
+      try {
+        await savePaper(updated);
+      } catch (caught) {
+        papers.value = papers.value.map((item) =>
+          item.id === paper.id && item.updatedAt === updated.updatedAt
+            ? paper
+            : item,
+        );
+        error.value = localize(
+          locale.value,
+          `論文情報を保存できませんでした。${caught instanceof Error ? ` ${caught.message}` : " 変更を元に戻しました。"}`,
+          `Could not save the paper metadata.${caught instanceof Error ? ` ${caught.message}` : " The change was reverted."}`,
+        );
+      } finally {
+        const next = { ...pendingPaperWrites.value };
+        delete next[paper.id];
+        pendingPaperWrites.value = next;
+      }
     },
   );
   const visiblePapers = papers.value
@@ -488,6 +511,7 @@ export default component$(() => {
                                 : ((index + 1) as PaperDocument["rating"]),
                           })
                         }
+                        disabled={!!pendingPaperWrites.value[paper.id]}
                       >
                         <Icon
                           name="Star"
@@ -518,6 +542,7 @@ export default component$(() => {
                       onClick$={() =>
                         updatePaper(paper, { favorite: !paper.favorite })
                       }
+                      disabled={!!pendingPaperWrites.value[paper.id]}
                     >
                       <Icon
                         name="Heart"
@@ -526,6 +551,17 @@ export default component$(() => {
                       />
                     </button>
                   </div>
+                  {firstMatch && firstMatch.pageNumber > 0 && (
+                    <Link
+                      href={`/papers/${paper.id}/?page=${firstMatch.pageNumber}`}
+                      class="inline-flex items-center gap-1 text-xs font-semibold text-sky-700 hover:text-sky-950"
+                    >
+                      <Icon name="ArrowRight" size={14} />
+                      {locale.value === "en"
+                        ? `Open ${pageLabel(firstMatch.pageNumber, locale.value)}`
+                        : `${pageLabel(firstMatch.pageNumber, locale.value)}を開く`}
+                    </Link>
+                  )}
                 </div>
               </article>
             );

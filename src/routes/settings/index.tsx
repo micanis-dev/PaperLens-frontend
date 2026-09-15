@@ -498,7 +498,9 @@ export default component$(() => {
               type="file"
               accept="application/zip,.zip,application/json,.json"
               onChange$={(_, target) => {
-                if (target.files?.[0]) void importData(target.files[0]);
+                const selected = target.files?.[0];
+                target.value = "";
+                if (selected) void importData(selected);
               }}
             />
             <button
