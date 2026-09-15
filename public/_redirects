@@ -1,3 +1,0 @@
-# Paper IDs are generated locally in the browser, so their paths are unknown
-# at build time. Cloudflare Pages serves the static app shell for those routes.
-/* /index.html 200

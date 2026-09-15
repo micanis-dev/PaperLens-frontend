@@ -11,10 +11,11 @@
   "scripts": {
     "build": "qwik build",
     "build.client": "vite build",
-    "build.static": "vite build --config adapters/static/vite.config.ts",
+    "build.static": "vite build && vite build --config adapters/static/vite.config.ts",
     "build.preview": "vite build --ssr src/entry.preview.tsx",
     "build.types": "tsc --incremental --noEmit",
-    "deploy": "pnpm run build.static",
+    "deploy": "pnpm run build.static && wrangler deploy",
+    "deploy:dry-run": "pnpm run build.static && wrangler deploy --dry-run",
     "dev": "vite --mode ssr",
     "dev.debug": "node --inspect-brk ./node_modules/vite/bin/vite.js --mode ssr --force",
     "fmt": "prettier --write .",
@@ -43,7 +44,8 @@
     "typescript-plugin-css-modules": "latest",
     "undici": "*",
     "vite": "7.3.1",
-    "vite-tsconfig-paths": "^4.2.1"
+    "vite-tsconfig-paths": "^4.2.1",
+    "wrangler": "4.131.2"
   },
   "dependencies": {
     "@fontsource/line-seed-jp": "^5.3.1",

@@ -18,13 +18,22 @@ pnpm dev
 pnpm build
 ```
 
-静的CDN配信用のビルド（Cloudflare Pages等の公開ディレクトリは`dist`）:
+Cloudflare Workerの静的アセット配信用ビルド（公開ディレクトリは`dist`）:
 
 ```sh
 pnpm run build.static
 ```
 
-`build.static`はブラウザ内で完結するライブラリ・リーダーを静的ファイルとして出力します。`public/_redirects`で、ビルド時に存在しないローカル論文IDのパスもアプリシェルへフォールバックします。Go APIは別途`backend`のFly.ioデプロイで公開し、公開時だけ`VITE_API_BASE_URL=https://api.paperlens.micanis.dev`を指定します。
+本番デプロイは、型チェックとlintを通したうえで実行します。
+
+```sh
+pnpm run build.types
+pnpm run lint
+pnpm run deploy:dry-run
+pnpm run deploy
+```
+
+`build.static`はブラウザ内で完結するライブラリ・リーダーを静的ファイルとして出力します。`wrangler.jsonc`のSPAフォールバックにより、ビルド時に存在しないローカル論文IDのパスもアプリシェルへ戻します。Go APIは別途`backend`のFly.ioデプロイで公開し、本番ビルドでは`.env.production`の`VITE_API_BASE_URL=https://api.paperlens.micanis.dev`を使用します。
 
 `/register/`ではメールアドレス＋12文字以上のパスワード、またはApple・Google・GitHub SSOで新規登録できます。`/login/`もメール＋パスワードを既定にし、3つのSSOボタンを提供します。ログイン後の設定画面では、同じメールアドレスを確認したSSOだけを明示的に連携・解除できます。開発モードの`/login/`には、SSOアカウントを用意しなくても切り替えられる4人のテストユーザーが表示されます。
 
