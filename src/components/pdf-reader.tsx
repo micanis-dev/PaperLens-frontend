@@ -16,7 +16,7 @@ import { localize, useLocale } from "~/lib/i18n";
 export type AnnotationDraft = Pick<Annotation, "type" | "quote" | "rect"> & {
   pageNumber: number;
 };
-export type TranslationDraft = { pageNumber: number; quote: string };
+export type TranslationDraft = { pageNumber: number; quote: string; endPage?: number };
 export type PdfFitMode = "page" | "width" | "height";
 type Props = {
   documentId: string;
@@ -69,12 +69,21 @@ export const PdfReader = component$<Props>(
     const error = useSignal("");
     const search = useSignal("");
     const searchInput = useSignal<HTMLInputElement>();
+    // Keep the compact mobile toolbar focused on reading. Desktop users still
+    // get the optional in-app index search, while Cmd/Ctrl+F remains the
+    // browser's native search.
+    const showSearch = useSignal(true);
+    // eslint-disable-next-line qwik/no-use-visible-task
+    useVisibleTask$(() => {
+      showSearch.value = !window.matchMedia("(max-width: 767px)").matches;
+    });
     const searchMatches = useSignal<number[]>([]);
     const searchMatchIndex = useSignal(-1);
     const searchError = useSignal("");
     const pageError = useSignal("");
     const localZoom = useSignal(zoom);
     const selectedText = useSignal("");
+    const selectionTruncated = useSignal(false);
     const selectedRect = useSignal<AnnotationDraft["rect"]>();
     const selectedPage = useSignal(page);
     const fullscreen = useSignal(false);
@@ -94,13 +103,13 @@ export const PdfReader = component$<Props>(
         const renderScale = scale ?? localZoom.value;
         const renderKey = `${pageNumber}:${renderScale}`;
         if (
-          target.dataset.renderKey === renderKey &&
+          (target.dataset.renderKey === renderKey || target.dataset.renderRequest === renderKey) &&
           (target.dataset.rendered === "true" || renderTasks.value?.has(target))
         )
           return;
         const renderToken = crypto.randomUUID();
         target.dataset.renderToken = renderToken;
-        target.dataset.renderKey = renderKey;
+        target.dataset.renderRequest = renderKey;
         const pdfPage = await pdf.value.getPage(pageNumber);
         if (target.dataset.renderToken !== renderToken) return;
         const viewport = pdfPage.getViewport({ scale: renderScale });
@@ -166,7 +175,9 @@ export const PdfReader = component$<Props>(
         if (target.dataset.pdfPageHost !== undefined) {
           const textLayerContainer = document.createElement("div");
           textLayerContainer.dataset.pdfTextLayer = String(pageNumber);
-          textLayerContainer.setAttribute("aria-hidden", "true");
+          // Keep extracted text available to assistive technology. The visual
+          // layer remains transparent while the canvas provides the PDF view.
+          textLayerContainer.setAttribute("role", "document");
           target.appendChild(textLayerContainer);
           const { TextLayer } = (await import(
             "pdfjs-dist/build/pdf.mjs"
@@ -186,6 +197,7 @@ export const PdfReader = component$<Props>(
           await textLayer.render();
         }
         if (target.dataset.renderToken !== renderToken) return;
+        target.dataset.renderKey = renderKey;
         target.dataset.rendered = "true";
       },
     );
@@ -378,8 +390,8 @@ export const PdfReader = component$<Props>(
           (event.metaKey || event.ctrlKey) &&
           event.key.toLowerCase() === "f"
         ) {
-          event.preventDefault();
-          searchInput.value?.focus();
+          // Leave Cmd/Ctrl+F to the browser's native PDF/text search. The
+          // optional PaperLens search remains available from the toolbar.
           return;
         }
         if (
@@ -388,7 +400,7 @@ export const PdfReader = component$<Props>(
           (event.key === "ArrowLeft" || event.key === "ArrowRight")
         )
           return;
-        if (editing) return;
+        if (editing || target?.tagName === "SELECT" || target?.tagName === "BUTTON") return;
         if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
           event.preventDefault();
           void onPage$(Math.max(1, page - 1));
@@ -535,6 +547,7 @@ export const PdfReader = component$<Props>(
     const captureSelection = $(() => {
       const selection = window.getSelection();
       const quote = selection?.toString().trim() || "";
+      selectionTruncated.value = quote.length > 4_000;
       selectedText.value = quote.slice(0, 4_000);
       const range = selection?.rangeCount
         ? selection.getRangeAt(0).getBoundingClientRect()
@@ -568,6 +581,7 @@ export const PdfReader = component$<Props>(
         rect: selectedRect.value,
       });
       selectedText.value = "";
+      selectionTruncated.value = false;
       selectedRect.value = undefined;
       window.getSelection()?.removeAllRanges();
     });
@@ -578,6 +592,7 @@ export const PdfReader = component$<Props>(
         quote: selectedText.value,
       });
       selectedText.value = "";
+      selectionTruncated.value = false;
       selectedRect.value = undefined;
       window.getSelection()?.removeAllRanges();
     });
@@ -744,8 +759,22 @@ export const PdfReader = component$<Props>(
               ))}
             </div>
           </aside>
-          <div class="flex min-h-0 min-w-0 flex-col">
-            <div class="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white px-3 py-2">
+          <div class="relative flex min-h-0 min-w-0 flex-col">
+            <div class={`${minimal ? "absolute inset-x-0 top-0 z-10 shadow-md" : ""} flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white px-3 py-2`}>
+              <button
+                type="button"
+                class="button subtle py-1 text-xs"
+                aria-expanded={showSearch.value}
+                onClick$={() => {
+                  showSearch.value = !showSearch.value;
+                  if (showSearch.value) requestAnimationFrame(() => searchInput.value?.focus());
+                }}
+              >
+                <Icon name="Search" size={15} />
+                {showSearch.value ? localize(locale.value, "検索を閉じる", "Hide search") : localize(locale.value, "PDF内検索", "Search PDF")}
+              </button>
+              {showSearch.value && (
+                <>
               <label class="relative min-w-48 flex-1">
                 <span class="sr-only">
                   {localize(locale.value, "PDF内検索", "Search PDF")}
@@ -819,6 +848,19 @@ export const PdfReader = component$<Props>(
                   {searchError.value}
                 </span>
               )}
+                </>
+              )}
+              {!Object.values(textByPage.value).some((text) => text.trim()) && !loading.value && (
+                <span role="status" class="text-xs text-amber-700">
+                  {localize(locale.value, "本文テキストがないPDFです。検索・翻訳・選択は利用できません。", "This PDF has no extractable text. Search, translation, and selection are unavailable.")}
+                </span>
+              )}
+              {textByPage.value[page]?.trim() && (
+                <details class="ml-auto max-w-full text-xs text-slate-600">
+                  <summary class="cursor-pointer px-2 py-1 font-semibold">{localize(locale.value, "このページのテキスト", "Page text")}</summary>
+                  <p class="max-h-40 max-w-xl overflow-auto whitespace-pre-wrap border border-slate-200 bg-slate-50 p-2">{textByPage.value[page]}</p>
+                </details>
+              )}
               {!minimal && (
                 <button
                   type="button"
@@ -855,6 +897,8 @@ export const PdfReader = component$<Props>(
                   <div
                     class="relative bg-white shadow-xl"
                     onMouseUp$={captureSelection}
+                    onKeyUp$={captureSelection}
+                    onTouchEnd$={captureSelection}
                   >
                     <div
                       ref={singlePageHost}
@@ -902,6 +946,8 @@ export const PdfReader = component$<Props>(
                       data-pdf-page-shell={number}
                       class="relative w-fit bg-white shadow-xl"
                       onMouseUp$={captureSelection}
+                      onKeyUp$={captureSelection}
+                      onTouchEnd$={captureSelection}
                     >
                       <div
                         data-pdf-page-host
@@ -946,6 +992,11 @@ export const PdfReader = component$<Props>(
                     {localize(locale.value, "選択: ", "Selected: ")}
                     {selectedText.value}
                   </span>
+                  {selectionTruncated.value && (
+                    <span class="w-full text-amber-800">
+                      {localize(locale.value, "選択範囲が4,000文字を超えたため先頭のみを対象にします。", "The selection exceeds 4,000 characters; only the beginning will be used.")}
+                    </span>
+                  )}
                   <button
                     type="button"
                     class="button py-1 text-xs"

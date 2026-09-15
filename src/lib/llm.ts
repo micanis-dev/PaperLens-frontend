@@ -61,7 +61,7 @@ export async function testProvider(settings: ProviderSettings) {
 
 export async function generateTags(settings: ProviderSettings, paper: PaperDocument) {
 	if (settings.mode === "paperlens-managed") {
-		throw new Error("タグ候補生成は直接接続したProviderで利用してください。管理LLMへ本文は送信しません。");
+		throw new Error("タグ候補生成はUser LLM (API)またはUser LLM (Local)で利用してください。PaperLens LLMへ本文は送信しません。");
 	}
 	const file = await getPaperFile(paper.id);
   const text = Object.values(file?.textByPage || {}).join("\n").slice(0, 18_000);

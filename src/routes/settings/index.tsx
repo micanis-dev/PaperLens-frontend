@@ -17,7 +17,7 @@ import {
   savePaperBundles,
   saveSetting,
 } from "~/lib/storage";
-import { exportBackupZip, importBackupZip } from "~/lib/backup";
+import { exportBackupZip, importBackupZip, inspectBackupZip } from "~/lib/backup";
 import {
   checkManagedAccess,
   cancelAccountDeletion,
@@ -39,17 +39,27 @@ import {
 import {
   managedModels,
   paperDocumentSchema,
+  providerFamilyForMode,
   type ProviderSettings,
 } from "~/lib/domain";
 import { localize, useLocale } from "~/lib/i18n";
 
 const defaultProvider: ProviderSettings = {
   mode: "local",
-  model: "llama3.2",
+  model: "",
   baseUrl: "http://127.0.0.1:11434/v1",
   targetLanguage: "ja",
   connected: false,
 };
+
+function normalizeStoredProvider(provider: ProviderSettings): ProviderSettings {
+  // Remove the old built-in local default, but never overwrite a connected
+  // user's explicit model choice.
+  if (!provider.connected && provider.model === "llama3.2") {
+    return { ...provider, model: "" };
+  }
+  return provider;
+}
 
 type ConnectionErrors = {
   model?: string;
@@ -72,8 +82,10 @@ export default component$(() => {
   const importInput = useSignal<HTMLInputElement>();
   const exportController = useSignal<AbortController>();
   const exportProgress = useSignal(0);
+  const importBusy = useSignal(false);
   const deletion = useSignal<AccountDeletion>();
   const accountState = useSignal<"unknown" | "signed-out" | "ready">("unknown");
+  const accountError = useSignal("");
   const deletionBusy = useSignal(false);
   const linkedIdentities = useSignal<LinkedIdentity[]>([]);
   const identityBusy = useSignal("");
@@ -94,7 +106,7 @@ export default component$(() => {
       ]);
       language.value = savedLanguage;
       viewMode.value = savedViewMode;
-      provider.value = savedProvider;
+      provider.value = normalizeStoredProvider(savedProvider);
       apiKey.value = getSessionProvider()?.apiKey || "";
     } catch {
       storageState.value = "unavailable";
@@ -121,12 +133,17 @@ export default component$(() => {
       deletion.value = response.deletion;
       accountState.value = "ready";
       linkedIdentities.value = (await getLinkedIdentities()).identities;
-    } catch {
-      accountState.value = "signed-out";
+    } catch (error) {
+      if (error instanceof Error && "details" in error && (error as { details?: { code?: string } }).details?.code === "unauthorized") accountState.value = "signed-out";
+      else { accountState.value = "unknown"; accountError.value = error instanceof Error ? error.message : "アカウント情報を取得できませんでした"; }
     }
   });
   const updateProvider = $((patch: Partial<ProviderSettings>) => {
     provider.value = { ...provider.value, ...patch, connected: false };
+    // Any endpoint/model change invalidates the in-memory verified session.
+    // The reader must not continue sending with credentials for an older
+    // configuration while the user is editing these fields.
+    rememberProviderSettings({ ...provider.value, apiKey: undefined, connected: false });
     connectionErrors.value = {};
     connectionMessage.value = "";
   });
@@ -213,7 +230,15 @@ export default component$(() => {
     };
     try {
       if (candidate.mode === "paperlens-managed") await checkManagedAccess();
-      else await testProvider(candidate);
+      else {
+        let timeout: number | undefined;
+        try {
+          await Promise.race([
+            testProvider(candidate),
+            new Promise<never>((_, reject) => { timeout = window.setTimeout(() => reject(new Error(localize(locale.value, "接続確認がタイムアウトしました。", "Connection check timed out."))), 15_000); }),
+          ]);
+        } finally { if (timeout) window.clearTimeout(timeout); }
+      }
       provider.value = { ...candidate, apiKey: undefined };
       rememberProviderSettings(candidate);
       const canReconnectWithoutSecret =
@@ -268,6 +293,17 @@ export default component$(() => {
       await Promise.all([
         saveSetting("uiLanguage", language.value),
         saveSetting("viewMode", viewMode.value),
+        saveSetting("provider", {
+          ...provider.value,
+          apiKey: undefined,
+          // A key-backed provider cannot be restored as connected after a
+          // reload because secrets intentionally remain session-only.
+          connected:
+            provider.value.connected &&
+            (provider.value.mode === "paperlens-managed" ||
+              provider.value.mode === "local" ||
+              (provider.value.mode === "openai-compatible" && !getSessionProvider()?.apiKey)),
+        }),
       ]);
       locale.value = language.value === "en" ? "en" : "ja";
       document.documentElement.lang = locale.value;
@@ -338,8 +374,16 @@ export default component$(() => {
   });
   const cancelExport = $(() => exportController.value?.abort());
   const importData = $(async (file: File) => {
+    const isZip = file.name.toLowerCase().endsWith(".zip");
+    importBusy.value = true;
     try {
-      if (file.name.toLowerCase().endsWith(".zip")) {
+      if (isZip) {
+        const preview = await inspectBackupZip(file);
+        const existingIDs = new Set((await listPapers()).map((paper) => paper.id));
+        const overwriteCount = preview.ids.filter((id) => existingIDs.has(id)).length;
+        const addCount = preview.count - overwriteCount;
+        const sample = preview.titles.slice(0, 3).join("、");
+        if (!window.confirm(`${file.name}を復元しますか？追加 ${addCount}件・上書き ${overwriteCount}件。${sample ? `対象: ${sample}${preview.count > 3 ? "…" : ""}。` : ""}既存の同じIDの論文情報は上書きされます。`)) return;
         const count = await importBackupZip(file);
         message.value = `${count}件の論文をPDF・メタデータごと復元しました。`;
         return;
@@ -352,6 +396,13 @@ export default component$(() => {
         throw new Error("PaperLensのバックアップ形式ではありません。");
       if (parsed.papers.length > 5_000)
         throw new Error("バックアップ内の論文数が上限を超えています。");
+      const existingIDs = new Set((await listPapers()).map((paper) => paper.id));
+      const overwriteCount = parsed.papers.filter((candidate) => {
+        const result = paperDocumentSchema.safeParse(candidate);
+        return result.success && existingIDs.has(result.data.id);
+      }).length;
+      const addCount = parsed.papers.length - overwriteCount;
+      if (!window.confirm(`${file.name}を復元しますか？追加 ${addCount}件・上書き ${overwriteCount}件。既存の同じIDの論文情報は置き換わります。`)) return;
       const bundles = parsed.papers.map((candidate) => {
         const result = paperDocumentSchema.safeParse(candidate);
         if (!result.success)
@@ -363,17 +414,23 @@ export default component$(() => {
     } catch (e) {
       message.value =
         e instanceof Error ? e.message : "インポートに失敗しました";
+    } finally {
+      importBusy.value = false;
     }
   });
   const clearData = $(async () => {
     if (
       !window.confirm(
-        "ローカルライブラリ、PDF、翻訳、注釈をすべて削除しますか？この操作は元に戻せません。",
+        "この端末のライブラリ、PDF、翻訳、注釈、設定をすべて削除しますか？この操作は元に戻せません。バックアップを先に作成してください。",
       )
     )
       return;
     try {
       await clearLocalData();
+      storageInfo.value = "0MB";
+      provider.value = defaultProvider;
+      linkedIdentities.value = [];
+      deletion.value = undefined;
       message.value = "ローカルデータを削除しました。";
     } catch (error) {
       message.value =
@@ -385,6 +442,9 @@ export default component$(() => {
   const logout = $(async () => {
     try {
       await logoutManagedSession();
+      accountState.value = "signed-out";
+      linkedIdentities.value = [];
+      deletion.value = undefined;
       authMessage.value =
         "ログアウトしました。ローカルライブラリはそのまま利用できます。";
     } catch (error) {
@@ -501,11 +561,11 @@ export default component$(() => {
         >
           <div class="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <h2 class="font-bold">{t("AI翻訳", "AI translation")}</h2>
+              <h2 class="font-bold">{t("LLM接続", "LLM connection")}</h2>
               <p class="mt-2 text-sm text-slate-500">
                 {t(
-                  "接続後、PDFリーダーの翻訳ボタンから利用できます。",
-                  "After connecting, use the translate button in the PDF reader.",
+                  "まず利用先を選び、接続確認後にPDFリーダーから利用できます。",
+                  "Choose where to run the LLM first, then connect before using it in the PDF reader.",
                 )}
               </p>
             </div>
@@ -523,40 +583,89 @@ export default component$(() => {
             </span>
           </div>
           <div class="mt-5 grid gap-5 sm:grid-cols-2">
+            <div class="sm:col-span-2">
+              <p class="mb-2 text-sm font-semibold text-slate-800">
+                {t("利用先", "LLM destination")}
+              </p>
+              <div class="grid gap-3 md:grid-cols-3" role="group" aria-label={t("LLM利用先", "LLM destination")}>
+                {([
+                  {
+                    family: "paperlens" as const,
+                    label: "PaperLens LLM",
+                    description: t("PaperLensへ送信 · クレジットを使用", "Sent to PaperLens · uses credits"),
+                    mode: "paperlens-managed" as const,
+                  },
+                  {
+                    family: "user-api" as const,
+                    label: "User LLM (API)",
+                    description: t("選択したAPIへ直接送信 · 自分のキーを使用", "Sent directly to your API · uses your key"),
+                    mode: "openai" as const,
+                  },
+                  {
+                    family: "user-local" as const,
+                    label: "User LLM (Local)",
+                    description: t("端末内で実行 · 外部クラウドへ送信しない", "Runs locally · not sent to a cloud service"),
+                    mode: "local" as const,
+                  },
+                ] as const).map((item) => {
+                  const selected = providerFamilyForMode(provider.value.mode) === item.family;
+                  return (
+                    <button
+                      key={item.family}
+                      type="button"
+                      class={`border p-4 text-left transition-colors ${selected ? "border-sky-500 bg-sky-50 ring-1 ring-sky-500" : "border-slate-200 bg-white hover:border-slate-400"}`}
+                      aria-pressed={selected}
+                      disabled={connectionBusy.value}
+                      onClick$={() => {
+                        updateProvider({
+                          mode:
+                            item.family === "user-api" && providerFamilyForMode(provider.value.mode) === "user-api"
+                              ? provider.value.mode
+                              : item.mode,
+                          model:
+                            item.family === "paperlens"
+                              ? "gpt-5.6-terra"
+                              : providerFamilyForMode(provider.value.mode) === item.family
+                                ? provider.value.model
+                                : "",
+                          baseUrl:
+                            item.family === "user-local"
+                              ? "http://127.0.0.1:11434/v1"
+                              : provider.value.baseUrl,
+                        });
+                      }}
+                    >
+                      <span class="block text-sm font-bold text-slate-950">{item.label}</span>
+                      <span class="mt-1 block text-xs leading-5 text-slate-500">{item.description}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            {providerFamilyForMode(provider.value.mode) === "user-api" && (
+              <label>
+                {t("APIプロバイダー", "API provider")}
+                <select
+                  value={provider.value.mode}
+                  disabled={connectionBusy.value}
+                  onChange$={(_, el) =>
+                    updateProvider({
+                      mode: el.value as ProviderSettings["mode"],
+                      model: "",
+                    })
+                  }
+                >
+                  <option value="openai">OpenAI</option>
+                  <option value="google">Google</option>
+                  <option value="anthropic">Anthropic</option>
+                  <option value="openai-compatible">OpenAI-compatible</option>
+                </select>
+              </label>
+            )}
             <label>
-              {t("接続方法", "Connection")}
-              <select
-                value={provider.value.mode}
-                disabled={connectionBusy.value}
-                onChange$={(_, el) => {
-                  const mode = el.value as ProviderSettings["mode"];
-                  updateProvider({
-                    mode,
-                    model:
-                      mode === "paperlens-managed"
-                        ? "gpt-5.6-terra"
-                        : provider.value.model,
-                    baseUrl:
-                      mode === "local"
-                        ? "http://127.0.0.1:11434/v1"
-                        : provider.value.baseUrl,
-                  });
-                }}
-              >
-                <option value="paperlens-managed">PaperLens AI</option>
-                <option value="local">
-                  {t("この端末のAI", "AI on this device")}
-                </option>
-                <option value="openai">OpenAI</option>
-                <option value="google">Google</option>
-                <option value="anthropic">Anthropic</option>
-                <option value="openai-compatible">
-                  {t("その他のAPI", "Other API")}
-                </option>
-              </select>
-            </label>
-            <label>
-              {t("モデル", "Model")}
+              {providerFamilyForMode(provider.value.mode) === "paperlens"
+                ? t("モデル", "Model")
+                : t("モデル名（必須）", "Model name (required)")}
               {provider.value.mode === "paperlens-managed" ? (
                 <select
                   value={provider.value.model}
@@ -573,7 +682,15 @@ export default component$(() => {
                 <input
                   value={provider.value.model}
                   maxLength={200}
+                  required
                   disabled={connectionBusy.value}
+                  class={
+                    connectionErrors.value.model
+                      ? "border-red-400 bg-red-50"
+                      : !provider.value.model.trim()
+                        ? "border-amber-400 bg-amber-50"
+                        : undefined
+                  }
                   aria-invalid={
                     connectionErrors.value.model ? "true" : undefined
                   }
@@ -583,7 +700,7 @@ export default component$(() => {
                   onInput$={(_, el) => updateProvider({ model: el.value })}
                 />
               )}
-              {connectionErrors.value.model && (
+              {connectionErrors.value.model ? (
                 <span
                   id="ai-model-error"
                   class="mt-1 block text-xs font-normal text-red-700"
@@ -591,9 +708,17 @@ export default component$(() => {
                 >
                   {connectionErrors.value.model}
                 </span>
-              )}
+              ) : providerFamilyForMode(provider.value.mode) !== "paperlens" &&
+                !provider.value.model.trim() ? (
+                <span class="mt-1 block text-xs font-normal text-amber-700">
+                  {t(
+                    "接続先のモデル名を入力してください。",
+                    "Enter the model name supported by this endpoint.",
+                  )}
+                </span>
+              ) : null}
             </label>
-            {(provider.value.mode === "local" ||
+            {(providerFamilyForMode(provider.value.mode) === "user-local" ||
               provider.value.mode === "openai-compatible") && (
               <label class="sm:col-span-2">
                 {t("接続先", "Endpoint")}
@@ -627,11 +752,10 @@ export default component$(() => {
                 )}
               </label>
             )}
-            {provider.value.mode !== "paperlens-managed" &&
-              provider.value.mode !== "local" && (
+            {providerFamilyForMode(provider.value.mode) === "user-api" && (
                 <label class="sm:col-span-2">
                   {t(
-                    "APIキー（この画面を閉じるまで）",
+                    "APIキー（このセッションのみ）",
                     "API key (this session only)",
                   )}
                   <input
@@ -702,15 +826,18 @@ export default component$(() => {
                 {authMessage.value}
               </p>
             )}
+            {accountError.value && <p class="mt-2 text-sm text-red-700" role="alert">{accountError.value}</p>}
           </div>
           {accountState.value === "ready" ? (
             <button type="button" class="button" onClick$={logout}>
               {t("ログアウト", "Log out")}
             </button>
           ) : accountState.value === "signed-out" ? (
-            <Link href="/login/" class="button primary">
+              <Link href="/login/?returnTo=%2Fsettings%2F" class="button primary">
               {t("ログイン", "Log in")}
             </Link>
+          ) : accountError.value ? (
+            <button type="button" class="button text-red-700" onClick$={() => window.location.reload()}>{t("再試行", "Retry")}</button>
           ) : (
             <span class="text-sm text-slate-400" role="status">
               {t("確認中…", "Checking…")}
@@ -829,11 +956,16 @@ export default component$(() => {
               </button>
             </div>
           )}
+          {importBusy.value && (
+            <p class="mt-4 border-l-2 border-sky-400 bg-sky-50 p-3 text-sm text-sky-900" role="status">
+              {t("バックアップを復元しています…", "Restoring backup…")}
+            </p>
+          )}
           <div class="mt-5 flex flex-wrap gap-3">
             <button
               type="button"
               class="button primary"
-              disabled={!!exportController.value}
+              disabled={!!exportController.value || importBusy.value}
               onClick$={exportZip}
             >
               <Icon name="Download" size={16} />
@@ -842,6 +974,7 @@ export default component$(() => {
             <button
               type="button"
               class="button"
+              disabled={!!exportController.value || importBusy.value}
               onClick$={() => importInput.value?.click()}
             >
               <Icon name="Upload" size={16} />
@@ -884,7 +1017,7 @@ export default component$(() => {
           </details>
         </section>
         <div class="settings-action-bar flex items-center justify-end gap-4">
-          <span class="text-sm text-emerald-700" role="status">
+          <span class={`text-sm ${message.value.includes("できません") || message.value.includes("失敗") || message.value.includes("不足") ? "text-red-700" : "text-emerald-700"}`} role={message.value.includes("できません") || message.value.includes("失敗") || message.value.includes("不足") ? "alert" : "status"}>
             {message.value}
           </span>
           <button type="button" class="button primary" onClick$={save}>

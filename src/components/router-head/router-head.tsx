@@ -14,7 +14,24 @@ export const RouterHead = component$(() => {
 
       <link rel="canonical" href={loc.url.href} />
       <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-      <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+      <link
+        rel="icon"
+        type="image/png"
+        sizes="32x32"
+        href="/icons/paperlens-sky-v1-32.png"
+      />
+      <link
+        rel="icon"
+        type="image/svg+xml"
+        sizes="any"
+        href="/icons/paperlens-sky-v1.svg"
+      />
+      <link
+        rel="apple-touch-icon"
+        sizes="180x180"
+        href="/apple-touch-icon.png"
+      />
+      <meta name="theme-color" content="#38bdf8" />
 
       {head.meta.map((m) => (
         <meta key={m.key} {...m} />

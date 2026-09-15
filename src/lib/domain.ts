@@ -11,6 +11,29 @@ export const translationModes = [
 
 export type TranslationMode = (typeof translationModes)[number];
 
+/** The user-facing connection families. Keep provider-specific modes internal. */
+export type ProviderFamily = "paperlens" | "user-api" | "user-local";
+
+export function providerFamilyForMode(mode: TranslationMode): ProviderFamily {
+  if (mode === "paperlens-managed") return "paperlens";
+  if (mode === "local") return "user-local";
+  return "user-api";
+}
+
+export function providerDisplayName(mode: TranslationMode): string {
+  if (mode === "paperlens-managed") return "PaperLens LLM";
+  if (mode === "local") return "User LLM (Local)";
+  const provider =
+    mode === "openai"
+      ? "OpenAI"
+      : mode === "google"
+        ? "Google"
+        : mode === "anthropic"
+          ? "Anthropic"
+          : "OpenAI-compatible";
+  return `User LLM (API) · ${provider}`;
+}
+
 export const managedModels = [
   { id: "gpt-6-astra", label: "GPT-6 Astra", credits: "目安 30 credits" },
   { id: "gpt-5.6-sol", label: "GPT-5.6 Sol", credits: "目安 12 credits" },
@@ -84,6 +107,8 @@ export type Translation = {
   updatedAt: string;
   revision: number;
   segments?: TranslationSegmentResult[];
+  pageStart?: number;
+  pageEnd?: number;
 };
 
 export const translationSchema = z.object({
@@ -94,6 +119,8 @@ export const translationSchema = z.object({
   source: z.enum(["manual", "llm"]),
   updatedAt: z.string(),
   revision: z.number().int().positive(),
+  pageStart: z.number().int().positive().optional(),
+  pageEnd: z.number().int().positive().optional(),
   segments: z.array(z.object({ id: z.string().min(1).max(256), pageNumber: z.number().int().positive(), sequence: z.number().int().positive().optional(), translatedText: z.string().max(100_000), sourceTextHash: z.string().min(1).max(128), sourceText: z.string().max(100_000).optional() })).max(2_000).optional(),
 });
 

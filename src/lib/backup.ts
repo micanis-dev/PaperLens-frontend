@@ -5,6 +5,26 @@ import { sha256 } from "./pdf";
 const MAX_BACKUP_BYTES = 1_024 * 1024 * 1024;
 const MAX_BACKUP_ENTRIES = 50_000;
 
+/** Read the user-visible contents of a ZIP before any IndexedDB write. The
+ * full importer still performs all validation; this lightweight pass exists
+ * solely to make the confirmation dialog concrete. */
+export async function inspectBackupZip(file: File) {
+  const { unzipSync, strFromU8 } = await import("fflate");
+  const entries = unzipSync(new Uint8Array(await file.arrayBuffer()));
+  const manifest = entries["manifest.json"] ? JSON.parse(strFromU8(entries["manifest.json"])) as { paperIds?: unknown[] } : undefined;
+  const ids = Array.isArray(manifest?.paperIds) ? manifest.paperIds.filter((id): id is string => typeof id === "string") : [];
+  const titles = ids.map((id) => {
+    try {
+      const raw = entries[`papers/${id}.json`];
+      const paper = raw ? JSON.parse(strFromU8(raw)) as { title?: string; fileName?: string } : {};
+      return paper.title || paper.fileName || id;
+    } catch {
+      return id;
+    }
+  });
+  return { count: ids.length, ids, titles };
+}
+
 export async function exportBackupZip(options?: { signal?: AbortSignal; onProgress?: (completed: number, total: number) => void }) {
   const { strToU8 } = await import("fflate");
   const papers = await listPapers();

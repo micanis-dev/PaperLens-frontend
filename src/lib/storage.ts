@@ -275,3 +275,11 @@ export async function saveSetting(key: string, value: unknown) {
   assertWritable();
   return (await getPaperLensDB()).put("settings", { key, value }, key);
 }
+
+/** Remove a browser-local setting completely. This is preferable to storing
+ * `undefined`, which IndexedDB can retain as a live key and cause stale drafts
+ * to be rediscovered on the next visit. */
+export async function removeSetting(key: string) {
+  assertWritable();
+  return (await getPaperLensDB()).delete("settings", key);
+}

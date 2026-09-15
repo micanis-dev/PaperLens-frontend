@@ -6,12 +6,12 @@ import {
   useStore,
   useVisibleTask$,
 } from "@builder.io/qwik";
-import { Link, type DocumentHead, useNavigate } from "@builder.io/qwik-city";
+import { Link, type DocumentHead, useLocation, useNavigate } from "@builder.io/qwik-city";
 import { AppShell } from "~/components/app-shell";
 import { Icon } from "~/components/icon";
 import type { PaperDocument } from "~/lib/domain";
 import { inspectPdf, sha256 } from "~/lib/pdf";
-import { listPapers, MAX_LOCAL_PAPERS, savePaper } from "~/lib/storage";
+import { getPaper, listPapers, MAX_LOCAL_PAPERS, savePaper } from "~/lib/storage";
 import { localize, useLocale } from "~/lib/i18n";
 
 type UploadItem = {
@@ -30,6 +30,7 @@ type UploadItem = {
     abstract?: string;
   };
   duplicate?: boolean;
+  duplicateTitle?: string;
   done: boolean;
   skipped?: boolean;
 };
@@ -83,6 +84,8 @@ const emptyPaper = (
 export default component$(() => {
   const locale = useLocale();
   const nav = useNavigate();
+  const location = useLocation();
+  const replaceId = location.url.searchParams.get("replace");
   const items = useStore<UploadItem[]>([]);
   const busy = useSignal(false);
   const drag = useSignal(false);
@@ -105,6 +108,13 @@ export default component$(() => {
     noticeIsError.value = false;
     busy.value = true;
     try {
+      const files = replaceId ? selected.slice(0, 1) : selected;
+      if (replaceId && selected.length > 1) {
+        notice.value = localize(locale.value, "PDFの再添付は1件ずつ選択してください。最初のファイルを処理します。", "Reattach one PDF at a time. The first selected file will be processed.");
+      }
+      // A direct route load can hydrate the signal without its non-serializable
+      // value. Recreate the browser-only file map before accepting files.
+      if (!fileRefs.value) fileRefs.value = noSerialize(new Map<string, File>());
       if (navigator.storage?.estimate) {
         const storage = await navigator.storage.estimate();
         const usageRatio = storage.quota
@@ -121,19 +131,20 @@ export default component$(() => {
       const pendingCount = items.filter(
         (item) => !item.done && !item.skipped,
       ).length;
-      if (existing.length + pendingCount + selected.length > MAX_LOCAL_PAPERS) {
+      const additional = replaceId ? 0 : files.length;
+      if (existing.length + pendingCount + additional > MAX_LOCAL_PAPERS) {
         noticeIsError.value = true;
         notice.value = `登録上限は${MAX_LOCAL_PAPERS.toLocaleString()}件です。不要な論文を削除してください。`;
         return;
       }
       const existingHashes = new Set(
-        existing.map((paper) => paper.contentHash).filter(Boolean),
+        existing.filter((paper) => paper.id !== replaceId).map((paper) => paper.contentHash).filter(Boolean),
       );
       const seenHashes = new Set([
         ...existingHashes,
         ...items.map((item) => item.hash).filter(Boolean),
       ]);
-      for (const file of selected) {
+      for (const file of files) {
         if (!uploadMounted.value) return;
         const inspection = {
           title: "",
@@ -142,7 +153,10 @@ export default component$(() => {
           publicationYear: undefined as number | undefined,
           textByPage: {} as Record<number, string>,
         };
-        const paper = emptyPaper(file, inspection);
+        const existingPaper = replaceId ? await getPaper(replaceId).catch(() => undefined) : undefined;
+        const paper = existingPaper
+          ? { ...existingPaper, fileName: file.name, fileSize: file.size, updatedAt: new Date().toISOString() }
+          : emptyPaper(file, inspection);
         fileRefs.value?.set(paper.id, file);
         const item: UploadItem = {
           id: paper.id,
@@ -169,17 +183,19 @@ export default component$(() => {
             item.progress = Math.round((page / pages) * 100);
           });
           item.textByPage = result.textByPage;
-          item.paper.title = result.title || item.paper.title;
-          item.paper.authors = result.author
-            ? result.author.split(/[,;]\s*/).filter(Boolean)
-            : [];
-          item.authorsInput = result.author || "";
-          item.paper.abstract = result.abstract || item.paper.abstract;
-          item.paper.publicationYear =
-            result.publicationYear || item.paper.publicationYear;
+          if (!existingPaper) {
+            item.paper.title = result.title || item.paper.title;
+            item.paper.authors = result.author
+              ? result.author.split(/[,;]\s*/).filter(Boolean)
+              : [];
+            item.paper.abstract = result.abstract || item.paper.abstract;
+            item.paper.publicationYear = result.publicationYear || item.paper.publicationYear;
+          }
+          item.authorsInput = item.paper.authors.join(", ");
           item.hash = await sha256(file);
           item.paper.contentHash = item.hash;
           item.duplicate = seenHashes.has(item.hash);
+          item.duplicateTitle = existing.find((paper) => paper.contentHash === item.hash)?.title;
           seenHashes.add(item.hash);
           item.progress = 100;
           item.state = item.duplicate ? "重複の可能性" : "確認待ち";
@@ -388,7 +404,7 @@ export default component$(() => {
         {items.length > 0 && (
           <div class="flex items-center justify-between border-b border-slate-200 pb-3">
             <span data-upload-count class="text-sm text-slate-500">
-              {items.filter((item) => item.done).length} / {items.length}{" "}
+              {items.filter((item) => item.done && !item.skipped).length} / {items.length}{" "}
               {localize(locale.value, "件を登録", "registered")}
             </span>
             <button
@@ -424,7 +440,9 @@ export default component$(() => {
                   <div class="min-w-0">
                     <h2 class="truncate font-semibold">{item.fileName}</h2>
                     <p data-upload-state class="mt-1 text-xs text-slate-400">
-                      {item.state}
+                      {item.done
+                        ? localize(locale.value, "登録済み", "Registered")
+                        : item.state}
                       {item.progress > 0 && item.progress < 100
                         ? ` · ${item.progress}%`
                         : ""}
@@ -475,6 +493,18 @@ export default component$(() => {
                         {item.fieldErrors.title}
                       </span>
                     )}
+                  </label>
+                  <label class="block text-sm font-semibold">
+                    <span class="mb-2 block">{localize(locale.value, "出版年（任意）", "Publication year (optional)")}</span>
+                    <input
+                      class="h-12 w-full px-4 text-base"
+                      type="number"
+                      min={0}
+                      max={9999}
+                      value={item.paper.publicationYear || ""}
+                      onInput$={(_, target) => { const value = Number(target.value); item.paper.publicationYear = Number.isInteger(value) && value > 0 ? value : undefined; }}
+                    />
+                    <span class="mt-1 block text-xs font-normal text-slate-500">{localize(locale.value, "PDFの作成日時ではなく、論文の出版年を確認してください。", "Check the paper's publication year; PDF file dates may be inaccurate.")}</span>
                   </label>
                   <label class="block text-sm font-semibold">
                     <span class="mb-2 block">
@@ -560,8 +590,8 @@ export default component$(() => {
                   <span>
                     {localize(
                       locale.value,
-                      "同じPDFハッシュの論文が既にあります。",
-                      "A paper with the same PDF hash already exists.",
+                      `同じPDFが登録済みです${item.duplicateTitle ? `（${item.duplicateTitle}）` : ""}。`,
+                      `This PDF is already registered${item.duplicateTitle ? ` as “${item.duplicateTitle}”` : ""}.`,
                     )}
                   </span>
                   <button
@@ -591,6 +621,7 @@ export default component$(() => {
                   <button
                     type="button"
                     class="button primary"
+                    disabled={busy.value}
                     data-upload-action="register"
                     data-index={index}
                   >

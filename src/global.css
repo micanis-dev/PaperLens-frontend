@@ -25,6 +25,13 @@
   border-radius: 0 !important;
 }
 
+/* Icon buttons have a component display rule; let responsive hidden utilities
+   override that rule on narrow screens. */
+.viewer-icon-button.hidden { display: none !important; }
+@media (min-width: 640px) {
+  .viewer-icon-button.hidden.sm\:inline-flex { display: inline-flex !important; }
+}
+
 html {
   min-width: 320px;
   background: #ffffff;
@@ -193,10 +200,16 @@ svg {
   }
 
   .paper-viewer-toolbar .viewer-toolbar-select {
-    max-width: 88px;
+    max-width: 72px;
     padding-right: 16px !important;
     padding-left: 4px !important;
   }
+}
+
+@media (max-width: 639px) {
+  .library-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .library-stats > div { padding: 0.75rem 1rem; }
+  .library-stats > div p:first-child { font-size: 1.25rem; }
 }
 
 @media (max-width: 767px) {
@@ -258,6 +271,13 @@ select {
    browser, including when utility styles are reordered by the CSS pipeline. */
 .library-search-input {
   padding-left: 2.75rem !important;
+}
+
+/* The global form padding is intentionally generous, but a compact row
+   control must keep its line box inside the declared height. */
+.library-reading-status {
+  padding-block: 0 !important;
+  line-height: 1.5rem;
 }
 
 .pdf-search-input {

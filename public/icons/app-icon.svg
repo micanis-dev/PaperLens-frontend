@@ -13,7 +13,7 @@
     <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%" color-interpolation-filters="sRGB">
       <feDropShadow dx="0" dy=".8" stdDeviation=".8" flood-color="#075985" flood-opacity=".20"/>
     </filter>
-    <clipPath id="tile"><rect width="1024" height="1024" rx="224"/></clipPath>
+    <clipPath id="tile"><rect width="1024" height="1024" rx="0"/></clipPath>
   </defs>
   <g clip-path="url(#tile)">
     <path fill="url(#ground)" d="M0 0h1024v1024H0z"/>

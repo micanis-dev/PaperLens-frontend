@@ -149,19 +149,28 @@ test("keeps translation in the reader and hides implementation details", async (
   await page.goto("/");
   await expect(page.getByRole("navigation", { name: "メインナビゲーション" })).not.toContainText("LLM");
   await page.goto("/settings/");
-  await expect(page.getByRole("heading", { name: "AI翻訳" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "LLM接続" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /PaperLens LLM/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /User LLM \(API\)/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /User LLM \(Local\)/ })).toBeVisible();
   await expect(page.locator("body")).not.toContainText("IndexedDB");
   await expect(page.getByText("接続済み").or(page.getByText("未接続"))).toBeVisible();
 });
 
-test("validates AI settings before making a request", async ({ page }) => {
+test("validates LLM settings before making a request", async ({ page }) => {
   await page.goto("/settings/#ai-connection");
-  await page.getByLabel("接続方法").selectOption("openai");
+  await page.getByRole("button", { name: /User LLM \(API\)/ }).click();
+  await page.getByLabel("APIプロバイダー").selectOption("openai");
+  const model = page.getByLabel("モデル名（必須）");
+  await expect(model).toHaveValue("");
+  await expect(model).toHaveClass(/border-amber-400/);
+  await model.fill("test-model");
   await page.getByRole("button", { name: "接続を確認" }).click();
   await expect(page.getByText("APIキーを入力してください")).toBeVisible();
 
-  await page.getByLabel("接続方法").selectOption("local");
-  await page.getByLabel("接続先").fill("https://example.com/v1");
+  await page.getByRole("button", { name: /User LLM \(Local\)/ }).click();
+  await page.getByLabel("モデル名（必須）").fill("llama3.2");
+  await page.locator('input[inputmode="url"]').fill("https://example.com/v1");
   await page.getByRole("button", { name: "接続を確認" }).click();
   await expect(
     page.getByText("ローカルLLMの接続先はlocalhostまたはプライベートネットワークに限定してください。"),

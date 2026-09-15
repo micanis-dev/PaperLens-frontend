@@ -34,9 +34,11 @@ export default component$(() => {
   const busy = useSignal("");
   const message = useSignal("");
   const signedOut = useSignal(false);
+  const loadError = useSignal("");
   const pendingPlan = useSignal("");
   const credits = useSignal<CreditBalance>();
   const consumed = useSignal(0);
+  const periodEnd = useSignal("");
 
   // Billing state is loaded after the client session is available.
   // eslint-disable-next-line qwik/no-use-visible-task
@@ -52,6 +54,7 @@ export default component$(() => {
       plans.value = catalog.plans;
       customer.value = Boolean(billing.subscription?.providerCustomerId);
       pendingPlan.value = billing.subscription?.pendingPlanId || "";
+      periodEnd.value = billing.subscription?.currentPeriodEnd || "";
       credits.value = creditResponse.credits;
       consumed.value = usageResponse.usage.creditsConsumed;
     } catch (error) {
@@ -62,6 +65,10 @@ export default component$(() => {
         error instanceof Error
           ? error.message
           : "課金情報を読み込めませんでした";
+      loadError.value = message.value;
+      currentPlan.value = "";
+      subscriptionStatus.value = "";
+      plans.value = [];
     } finally {
       loading.value = false;
     }
@@ -100,10 +107,30 @@ export default component$(() => {
   });
 
   const changePlan = $(async (plan: BillingPlan) => {
+    const current = plans.value.find((item) => item.id === currentPlan.value);
+    const priceChange = current ? plan.monthlyPriceYen - current.monthlyPriceYen : 0;
+    const renewal = periodEnd.value
+      ? new Intl.DateTimeFormat(locale.value === "en" ? "en-US" : "ja-JP", { dateStyle: "medium" }).format(new Date(periodEnd.value))
+      : "";
+    const currentName = planNames[currentPlan.value] || currentPlan.value;
+    const targetName = planNames[plan.id] || plan.id;
+    const priceText = `¥${plan.monthlyPriceYen.toLocaleString()} (${priceChange >= 0 ? "+" : "−"}¥${Math.abs(priceChange).toLocaleString()})`;
+    const rank: Record<string, number> = { free: 0, plus: 1, pro: 2, ultra: 3 };
+    const upgrade = (rank[plan.id] ?? 0) > (rank[currentPlan.value] ?? 0);
+    const timing = upgrade
+      ? (locale.value === "en" ? "Upgrade applies immediately; Stripe may charge a prorated difference now." : "アップグレードは即時適用され、Stripeから日割り差額が請求される場合があります。")
+      : (locale.value === "en" ? "Downgrade applies at the next renewal." : "ダウングレードは次回更新時に適用されます。");
+    const confirmation = locale.value === "en"
+      ? "Change from " + currentName + " to " + targetName + "? Monthly price: " + priceText + ". " + timing + (renewal ? " Current period ends " + renewal + "." : "")
+      : currentName + "から" + targetName + "へ変更しますか？月額: " + priceText + "。" + timing + (renewal ? `現在の契約期間は${renewal}までです。` : "");
+    if (!window.confirm(confirmation)) return;
     busy.value = plan.id;
     message.value = "プラン変更を受け付けています…";
     try {
       const result = await changeBillingPlan(plan.id);
+      currentPlan.value = result.subscription.planId || currentPlan.value;
+      pendingPlan.value = result.subscription.pendingPlanId || "";
+      subscriptionStatus.value = result.subscription.status || subscriptionStatus.value;
       message.value = result.subscription.pendingPlanId
         ? "ダウングレードを次回更新時に予約しました。"
         : "アップグレードをStripeへ依頼しました。Webhook反映後に有効になります。";
@@ -146,6 +173,16 @@ export default component$(() => {
           <Link href="/login/" class="button primary mt-6">
             {localize(locale.value, "ログイン", "Log in")}
           </Link>
+        </section>
+      </AppShell>
+    );
+  if (loadError.value)
+    return (
+      <AppShell>
+        <section class="border border-red-200 bg-red-50 p-8" role="alert">
+          <h1 class="text-2xl font-bold">{localize(locale.value, "課金情報を取得できません", "Could not load billing information")}</h1>
+          <p class="mt-3 text-sm text-red-800">{loadError.value}</p>
+          <button type="button" class="button mt-6" onClick$={() => window.location.reload()}>{localize(locale.value, "再読み込み", "Retry")}</button>
         </section>
       </AppShell>
     );
@@ -219,7 +256,7 @@ export default component$(() => {
             </div>
           </section>
         )}
-        <section class="grid gap-4 md:grid-cols-4">
+        <section class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {plans.value.map((plan) => (
             <article
               key={plan.id}
@@ -306,6 +343,7 @@ export default component$(() => {
               </dt>
               <dd class="mt-1 font-semibold">{subscriptionStatus.value}</dd>
             </div>
+            {periodEnd.value && <div><dt class="text-slate-500">{localize(locale.value, "次回更新日", "Next renewal")}</dt><dd class="mt-1 font-semibold">{new Intl.DateTimeFormat(locale.value === "en" ? "en-US" : "ja-JP", { dateStyle: "medium" }).format(new Date(periodEnd.value))}</dd></div>}
             <div>
               <dt class="text-slate-500">
                 {localize(locale.value, "現在のプラン", "Current plan")}

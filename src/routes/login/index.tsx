@@ -5,7 +5,7 @@ import {
   useSignal,
   useVisibleTask$,
 } from "@builder.io/qwik";
-import { Link, type DocumentHead, useNavigate } from "@builder.io/qwik-city";
+import { Link, type DocumentHead, useLocation, useNavigate } from "@builder.io/qwik-city";
 import { Icon } from "~/components/icon";
 import {
   apiBaseURL,
@@ -37,6 +37,8 @@ export default component$(() => {
   const testUsers = useSignal<DevTestUser[]>([]);
   const testUserBusy = useSignal("");
   const navigate = useNavigate();
+  const location = useLocation();
+  const returnTo = (() => { const value = location.url.searchParams.get("returnTo"); return value && value.startsWith("/") && !value.startsWith("//") ? value : "/"; })();
   const send = $(async () => {
     error.value = "";
     const normalizedEmail = email.value.trim();
@@ -51,7 +53,7 @@ export default component$(() => {
     busy.value = true;
     try {
       await loginPassword(normalizedEmail, password.value);
-      window.location.assign("/");
+      window.location.assign(returnTo);
     } catch (caught) {
       error.value =
         caught instanceof Error
@@ -117,7 +119,6 @@ export default component$(() => {
               autoComplete="email"
               required
               value={email.value}
-              aria-invalid={error.value ? "true" : undefined}
               onInput$={(_, el) => {
                 email.value = el.value;
                 error.value = "";

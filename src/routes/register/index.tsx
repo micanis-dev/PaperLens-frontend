@@ -5,7 +5,7 @@ import {
   useSignal,
   useVisibleTask$,
 } from "@builder.io/qwik";
-import { Link, type DocumentHead } from "@builder.io/qwik-city";
+import { Link, type DocumentHead, useLocation } from "@builder.io/qwik-city";
 import { Icon } from "~/components/icon";
 import {
   apiBaseURL,
@@ -25,6 +25,8 @@ export default component$(() => {
   const password = useSignal("");
   const busy = useSignal(false);
   const error = useSignal("");
+  const location = useLocation();
+  const returnTo = (() => { const value = location.url.searchParams.get("returnTo"); return value && value.startsWith("/") && !value.startsWith("//") ? value : "/"; })();
   // Registration preferences are stored in the browser.
   // eslint-disable-next-line qwik/no-use-visible-task
   useVisibleTask$(async () => {
@@ -48,7 +50,7 @@ export default component$(() => {
     busy.value = true;
     try {
       await registerPassword(email.value.trim(), password.value);
-      window.location.assign("/");
+      window.location.assign(returnTo);
     } catch (caught) {
       error.value =
         caught instanceof Error
@@ -62,7 +64,6 @@ export default component$(() => {
       busy.value = false;
     }
   });
-
   return (
     <main class="flex min-h-screen items-center justify-center bg-slate-50 px-5 py-12">
       <section class="w-full max-w-md border border-slate-200 bg-white p-7 shadow-xl">
@@ -97,7 +98,7 @@ export default component$(() => {
               required
               autoComplete="email"
               value={email.value}
-              onInput$={(_, el) => (email.value = el.value)}
+              onInput$={(_, el) => { email.value = el.value; error.value = ""; }}
             />
           </label>
           <label class="mt-4 block">
@@ -113,7 +114,7 @@ export default component$(() => {
               minLength={12}
               autoComplete="new-password"
               value={password.value}
-              onInput$={(_, el) => (password.value = el.value)}
+              onInput$={(_, el) => { password.value = el.value; error.value = ""; }}
             />
           </label>
           <button

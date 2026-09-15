@@ -8,6 +8,7 @@ import {
   listAnnotations,
   listPapers,
   listTranslations,
+  removePaper,
   savePaper,
 } from "~/lib/storage";
 import {
@@ -43,7 +44,7 @@ export default component$(() => {
   } as const;
   const location = useLocation();
   const papers = useSignal<PaperDocument[]>([]);
-  const query = useSignal("");
+  const query = useSignal(location.url.searchParams.get("q") || "");
   const status = useSignal<PaperDocument["readingStatus"] | "">(
     (location.url.searchParams.get(
       "status",
@@ -52,15 +53,17 @@ export default component$(() => {
   const favoriteOnly = useSignal(
     location.url.searchParams.get("favorite") === "true",
   );
-  const sort = useSignal<"recent" | "updated" | "rating" | "title">("recent");
-  const selectedTag = useSignal("");
-  const rating = useSignal<"" | "1" | "2" | "3" | "4" | "5">("");
-  const dateFilter = useSignal<"" | "7" | "30" | "365">("");
+  const sort = useSignal<"recent" | "updated" | "rating" | "title">((location.url.searchParams.get("sort") as "recent" | "updated" | "rating" | "title") || "recent");
+  const selectedTag = useSignal(location.url.searchParams.get("tag") || "");
+  const rating = useSignal<"" | "1" | "2" | "3" | "4" | "5">((location.url.searchParams.get("rating") || "") as "" | "1" | "2" | "3" | "4" | "5");
+  const dateFilter = useSignal<"" | "7" | "30" | "365">((location.url.searchParams.get("days") || "") as "" | "7" | "30" | "365");
   const loading = useSignal(true);
   const error = useSignal("");
   const searchIndex = useSignal<SearchIndexEntry[]>([]);
+  const searchIndexReady = useSignal(false);
+  const searchIndexError = useSignal("");
   const pendingPaperWrites = useSignal<Record<string, boolean>>({});
-
+  const removingPaper = useSignal("");
   const reload = $(async () => {
     try {
       papers.value = await listPapers();
@@ -120,7 +123,12 @@ export default component$(() => {
         return { documentId: paper.id, entries };
       }),
     );
-    searchIndex.value = await buildSearchIndex(indexed);
+    try {
+      searchIndex.value = await buildSearchIndex(indexed);
+      searchIndexReady.value = true;
+    } catch (caught) {
+      searchIndexError.value = caught instanceof Error ? caught.message : "全文検索を準備できませんでした";
+    }
   });
   const updatePaper = $(
     async (paper: PaperDocument, patch: Partial<PaperDocument>) => {
@@ -214,6 +222,17 @@ export default component$(() => {
     rating.value = "";
     dateFilter.value = "";
   });
+  const libraryReturnTo = (() => {
+    const params = new URLSearchParams();
+    if (query.value.trim()) params.set("q", query.value.trim());
+    if (status.value) params.set("status", status.value);
+    if (favoriteOnly.value) params.set("favorite", "true");
+    if (selectedTag.value) params.set("tag", selectedTag.value);
+    if (rating.value) params.set("rating", rating.value);
+    if (dateFilter.value) params.set("days", dateFilter.value);
+    if (sort.value !== "recent") params.set("sort", sort.value);
+    return `${location.url.pathname}${params.toString() ? `?${params}` : ""}`;
+  })();
   const exportMetadata = $(async () => {
     const payload = {
       schemaVersion: 1,
@@ -231,6 +250,18 @@ export default component$(() => {
     anchor.click();
     URL.revokeObjectURL(url);
   });
+  const deletePaper = $(async (paper: PaperDocument) => {
+    if (!window.confirm(`${paper.title || paper.fileName}をこの端末から削除しますか？PDF、翻訳、注釈も削除されます。`)) return;
+    removingPaper.value = paper.id;
+    try {
+      await removePaper(paper.id);
+      papers.value = papers.value.filter((item) => item.id !== paper.id);
+    } catch (caught) {
+      error.value = caught instanceof Error ? caught.message : "論文を削除できませんでした";
+    } finally {
+      removingPaper.value = "";
+    }
+  });
   return (
     <AppShell>
       <section class="app-page space-y-8">
@@ -239,6 +270,9 @@ export default component$(() => {
             <h1 class="text-3xl font-bold tracking-[-0.04em] sm:text-4xl">
               {message(locale.value, "libraryTitle")}
             </h1>
+            <p class="mt-2 text-sm text-slate-500">
+              {message(locale.value, "libraryDescription")} · {message(locale.value, "localDescription")}
+            </p>
           </div>
           <Link href="/upload/" class="button primary">
             <Icon name="Plus" size={18} />
@@ -246,7 +280,7 @@ export default component$(() => {
           </Link>
         </div>
         {(loading.value || papers.value.length > 0) && (
-          <div class="grid gap-px border border-slate-200 bg-slate-200 sm:grid-cols-4">
+          <div class="library-stats grid gap-px border border-slate-200 bg-slate-200 sm:grid-cols-4">
             {[
               [papers.value.length, message(locale.value, "registered")],
               [
@@ -407,6 +441,10 @@ export default component$(() => {
                 </button>
               )}
             </div>
+            {!searchIndexReady.value && !searchIndexError.value && (
+              <p class="mt-2 text-xs text-slate-400" role="status">{locale.value === "en" ? "Preparing full-text search…" : "本文検索を準備しています…"}</p>
+            )}
+            {searchIndexError.value && <p class="mt-2 text-xs text-red-700" role="alert">{searchIndexError.value}</p>}
           </div>
         )}
         {(loading.value || papers.value.length > 0) && (
@@ -474,7 +512,7 @@ export default component$(() => {
                 class="group flex flex-col gap-4 border border-slate-200 bg-white p-5 hover:border-sky-300 sm:flex-row sm:items-center"
               >
                 <Link
-                  href={`/papers/${paper.id}/`}
+                  href={`/papers/${paper.id}/?returnTo=${encodeURIComponent(libraryReturnTo)}`}
                   class="flex min-w-0 flex-1 items-center gap-4"
                 >
                   <div class="flex size-14 shrink-0 items-center justify-center bg-slate-100 text-slate-500 group-hover:bg-sky-100 group-hover:text-sky-700">
@@ -492,7 +530,7 @@ export default component$(() => {
                         >{`#${tag}`}</span>
                       ))}
                     </div>
-                    <h2 class="truncate text-base font-bold sm:text-lg">
+                    <h2 class="line-clamp-2 text-base font-bold sm:text-lg">
                       {paper.title || paper.fileName}
                     </h2>
                     <p class="mt-1 truncate text-sm text-slate-500">
@@ -510,11 +548,37 @@ export default component$(() => {
                         <span class="font-semibold text-sky-700">
                           {locations.join(", ")}
                         </span>{" "}
-                        · {excerpt}
+                        · {(() => {
+                          const hit = excerpt.toLowerCase().indexOf(needle);
+                          return hit >= 0 ? <>{excerpt.slice(0, hit)}<mark class="bg-sky-100 text-slate-950">{excerpt.slice(hit, hit + needle.length)}</mark>{excerpt.slice(hit + needle.length)}</> : excerpt;
+                        })()}
                       </p>
                     )}
                   </div>
                 </Link>
+                <details class="w-full shrink-0 sm:w-56">
+                  <summary class="cursor-pointer text-xs font-semibold text-slate-500 hover:text-slate-950">
+                    {locale.value === "en" ? "Edit details" : "論文情報を編集"}
+                  </summary>
+                  <div class="mt-2 space-y-2 border border-slate-200 bg-slate-50 p-3">
+                    <label class="block text-xs font-semibold">
+                      {locale.value === "en" ? "Title" : "タイトル"}
+                      <input class="mt-1 w-full px-2 py-1 text-xs" value={paper.title} onChange$={(_, el) => updatePaper(paper, { title: el.value })} />
+                    </label>
+                    <label class="block text-xs font-semibold">
+                      {locale.value === "en" ? "Authors" : "著者"}
+                      <input class="mt-1 w-full px-2 py-1 text-xs" value={paper.authors.join(", ")} onChange$={(_, el) => updatePaper(paper, { authors: el.value.split(",").map((item) => item.trim()).filter(Boolean) })} />
+                    </label>
+                    <label class="block text-xs font-semibold">
+                      {locale.value === "en" ? "Tags" : "タグ"}
+                      <input class="mt-1 w-full px-2 py-1 text-xs" value={paper.tags.join(", ")} placeholder="ai, review" onChange$={(_, el) => updatePaper(paper, { tags: el.value.split(",").map((item) => item.trim()).filter(Boolean) })} />
+                    </label>
+                    <label class="block text-xs font-semibold">
+                      {locale.value === "en" ? "Publication year" : "出版年"}
+                      <input class="mt-1 w-full px-2 py-1 text-xs" type="number" min={0} max={9999} value={paper.publicationYear || ""} onChange$={(_, el) => { const value = Number(el.value); void updatePaper(paper, { publicationYear: Number.isInteger(value) && value > 0 ? value : undefined }); }} />
+                    </label>
+                  </div>
+                </details>
                 <div class="flex shrink-0 items-center justify-between gap-5 sm:flex-col sm:items-end">
                   <div
                     class="flex items-center gap-1 text-sky-500"
@@ -552,7 +616,16 @@ export default component$(() => {
                       </button>
                     ))}
                   </div>
-                  <div class="flex items-center gap-3">
+                  <div class="flex flex-wrap items-center justify-end gap-3">
+                    <select
+                      aria-label={`${paper.title || paper.fileName}の読書状態`}
+                      class="library-reading-status h-8 w-28 shrink-0 px-2 py-1 text-xs"
+                      value={paper.readingStatus}
+                      disabled={!!pendingPaperWrites.value[paper.id]}
+                      onChange$={(_, el) => updatePaper(paper, { readingStatus: el.value as PaperDocument["readingStatus"] })}
+                    >
+                      {Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                    </select>
                     <span class="text-xs text-slate-400">
                       {paper.lastOpenedAt
                         ? `${message(locale.value, "lastOpened")} · ${formatDate(paper.lastOpenedAt, locale.value)}${paper.reader ? ` · ${pageLabel(paper.reader.page, locale.value)}` : ""}`
@@ -577,10 +650,19 @@ export default component$(() => {
                         class={paper.favorite ? "fill-current" : ""}
                       />
                     </button>
+                    <button
+                      type="button"
+                      class="flex size-8 items-center justify-center text-slate-300 hover:text-red-700"
+                      aria-label={`${paper.title || paper.fileName}を削除`}
+                      disabled={removingPaper.value === paper.id}
+                      onClick$={() => deletePaper(paper)}
+                    >
+                      <Icon name="Trash2" size={16} />
+                    </button>
                   </div>
                   {firstMatch && firstMatch.pageNumber > 0 && (
                     <Link
-                      href={`/papers/${paper.id}/?page=${firstMatch.pageNumber}`}
+                      href={`/papers/${paper.id}/?page=${firstMatch.pageNumber}&returnTo=${encodeURIComponent(libraryReturnTo)}`}
                       class="inline-flex items-center gap-1 text-xs font-semibold text-sky-700 hover:text-sky-950"
                     >
                       <Icon name="ArrowRight" size={14} />

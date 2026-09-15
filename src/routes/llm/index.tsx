@@ -4,7 +4,7 @@ import { AppShell } from "~/components/app-shell";
 import { Icon } from "~/components/icon";
 import { localize, useLocale } from "~/lib/i18n";
 
-/** Keep old bookmarks useful while translation stays beside its source PDF. */
+/** Keep old bookmarks useful while LLM selection lives in Settings. */
 export default component$(() => {
   const locale = useLocale();
   const t = (ja: string, en: string) => localize(locale.value, ja, en);
@@ -18,14 +18,14 @@ export default component$(() => {
           </span>
           <h1 class="mt-6 text-2xl font-bold tracking-[-0.03em]">
             {t(
-              "翻訳はPDFリーダーで使えます",
-              "Translation is in the PDF reader",
+              "LLMの選択は設定で行います",
+              "Choose your LLM in Settings",
             )}
           </h1>
           <p class="mt-3 max-w-2xl text-sm leading-7 text-slate-600">
             {t(
-              "論文を開き、右側の翻訳パネルから現在のページや選択した文章を翻訳できます。接続先は設定画面で選べます。",
-              "Open a paper and use the translation panel beside it to translate the current page or selected text. Choose your AI connection in Settings.",
+              "PaperLens LLM、User LLM (API)、User LLM (Local)から利用先を選べます。選択した送信先はPDFリーダーの確認画面にも表示されます。",
+              "Choose between PaperLens LLM, User LLM (API), and User LLM (Local). The selected destination is also shown before a PDF translation is sent.",
             )}
           </p>
           <div class="mt-7 flex flex-wrap gap-3">
@@ -35,7 +35,7 @@ export default component$(() => {
             </Link>
             <Link href="/settings/#ai-connection" class="button">
               <Icon name="Settings2" size={17} />
-              {t("AI接続を設定", "Configure AI")}
+              {t("LLM接続を設定", "Configure LLM")}
             </Link>
           </div>
         </div>

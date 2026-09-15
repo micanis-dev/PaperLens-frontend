@@ -238,7 +238,7 @@ export async function streamManagedTranslation(
     const body = await response.json() as ApiError;
     throw new PaperLensApiError(response.status, body);
   }
-  if (!response.body) throw new Error("管理LLMのストリームが利用できません。");
+  if (!response.body) throw new Error("PaperLens LLMのストリームが利用できません。");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
