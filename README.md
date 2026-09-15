@@ -2,6 +2,8 @@
 
 要件定義をもとにした PaperLens の Qwik City フロントエンドです。PDF と論文メタデータを端末内へ保存する local-first 構成を前提にしています。
 
+本番作業では、最初に [`DEPLOYMENT.md`](./DEPLOYMENT.md) の対象確認・検証・ロールバック手順をすべて確認してください。
+
 ## 開発
 
 プロジェクトルートで direnv を有効にしたあと、`frontend` で実行します。
