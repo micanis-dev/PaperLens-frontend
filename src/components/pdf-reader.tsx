@@ -36,6 +36,14 @@ type Props = {
   fitVersion?: number;
 };
 
+const safeDownloadName = (name: string, fallback: string) => {
+  const normalized = Array.from(
+    name.trim().replace(/[\\/:*?"<>|]/g, "_"),
+    (character) => (character.codePointAt(0)! < 32 ? "_" : character),
+  ).join("");
+  return normalized || fallback;
+};
+
 const clampPage = (value: number, total: number) =>
   Math.max(1, Math.min(total || value, value));
 
@@ -89,6 +97,7 @@ export const PdfReader = component$<Props>(
     const selectedPage = useSignal(page);
     const selectionStatus = useSignal("");
     const selectionStatusError = useSignal(false);
+    const selectedRange = useSignal<Range>();
     const fullscreen = useSignal(false);
     const pageFromScroll = useSignal<number>();
     const renderTasks =
@@ -539,11 +548,13 @@ export const PdfReader = component$<Props>(
           const url = URL.createObjectURL(file.file);
           const anchor = document.createElement("a");
           anchor.href = url;
-          anchor.download =
+          anchor.download = safeDownloadName(
             paper?.fileName ||
-            (file.file instanceof File ? file.file.name : `${documentId}.pdf`);
+              (file.file instanceof File ? file.file.name : `${documentId}.pdf`),
+            `${documentId}.pdf`,
+          );
           anchor.click();
-          URL.revokeObjectURL(url);
+          window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
         },
       );
     });
@@ -557,6 +568,9 @@ export const PdfReader = component$<Props>(
       selectionStatusError.value = false;
       const range = selection?.rangeCount
         ? selection.getRangeAt(0).getBoundingClientRect()
+        : undefined;
+      selectedRange.value = selection?.rangeCount
+        ? noSerialize(selection.getRangeAt(0).cloneRange())
         : undefined;
       const textLayer = selection?.anchorNode?.parentElement?.closest(
         "[data-pdf-text-layer]",
@@ -622,6 +636,11 @@ export const PdfReader = component$<Props>(
           "Could not copy. Select the text and copy it manually.",
         );
         selectionStatusError.value = true;
+      }
+      if (selectedRange.value) {
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(selectedRange.value);
       }
     });
     const translateSelection = $(() => {
@@ -1034,7 +1053,7 @@ export const PdfReader = component$<Props>(
                   </span>
                   {selectionTruncated.value && (
                     <span class="w-full text-amber-800">
-                      {localize(locale.value, "選択範囲が4,000文字を超えたため先頭のみを対象にします。", "The selection exceeds 4,000 characters; only the beginning will be used.")}
+                      {localize(locale.value, "選択範囲が4,000文字を超えたため、翻訳・注釈は先頭のみが対象です。コピーは全文を対象にします。", "The selection exceeds 4,000 characters; translation and annotations use only the beginning, while copy includes the full selection.")}
                     </span>
                   )}
                   <button

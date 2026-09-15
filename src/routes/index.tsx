@@ -69,6 +69,7 @@ export default component$(() => {
   const searchIndex = useSignal<SearchIndexEntry[]>([]);
   const searchIndexReady = useSignal(false);
   const searchIndexError = useSignal("");
+  const downloadableFiles = useSignal<Record<string, Blob>>({});
   const pendingPaperWrites = useSignal<Record<string, boolean>>({});
   const removingPaper = useSignal("");
   const reload = $(async () => {
@@ -87,6 +88,7 @@ export default component$(() => {
   // eslint-disable-next-line qwik/no-use-visible-task
   useVisibleTask$(async () => {
     await reload();
+    const files: Record<string, Blob> = {};
     const indexed = await Promise.all(
       papers.value.map(async (paper) => {
         const [file, annotations, translations] = await Promise.all([
@@ -101,6 +103,7 @@ export default component$(() => {
           text,
           kind: "pdf",
         }));
+        if (file) files[paper.id] = file.file;
         for (const annotation of annotations) {
           const noteText = [annotation.quote, annotation.content]
             .filter(Boolean)
@@ -130,6 +133,7 @@ export default component$(() => {
         return { documentId: paper.id, entries };
       }),
     );
+    downloadableFiles.value = files;
     try {
       searchIndex.value = await buildSearchIndex(indexed);
       searchIndexReady.value = true;
@@ -271,14 +275,14 @@ export default component$(() => {
   });
   const downloadPaper = $(async (paper: PaperDocument) => {
     try {
-      const file = await getPaperFile(paper.id);
-      if (!file) throw new Error("この論文のPDF本体が見つかりません。");
-      const url = URL.createObjectURL(file.file);
+      const blob = downloadableFiles.value[paper.id];
+      if (!blob) throw new Error("この論文のPDF本体を準備中です。少し待ってから再試行してください。");
+      const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
       anchor.download = safeDownloadName(paper.fileName, `${paper.id}.pdf`);
       anchor.click();
-      URL.revokeObjectURL(url);
+      window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
     } catch (caught) {
       error.value = caught instanceof Error ? caught.message : "PDFをダウンロードできませんでした";
     }
@@ -673,7 +677,7 @@ export default component$(() => {
                     </button>
                     <button
                       type="button"
-                      class="flex size-8 items-center justify-center text-slate-300 hover:text-red-700"
+                      class="flex size-11 items-center justify-center text-slate-300 hover:text-red-700"
                       aria-label={`${paper.title || paper.fileName}を削除`}
                       disabled={removingPaper.value === paper.id}
                       onClick$={() => deletePaper(paper)}
@@ -682,7 +686,8 @@ export default component$(() => {
                     </button>
                     <button
                       type="button"
-                      class="flex size-8 items-center justify-center text-slate-400 hover:text-sky-700"
+                      class="flex size-11 items-center justify-center text-slate-400 hover:text-sky-700"
+                      disabled={!downloadableFiles.value[paper.id]}
                       aria-label={
                         locale.value === "en"
                           ? `Download ${paper.title || paper.fileName}`
