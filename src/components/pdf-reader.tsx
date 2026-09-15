@@ -86,6 +86,7 @@ export const PdfReader = component$<Props>(
     const selectionTruncated = useSignal(false);
     const selectedRect = useSignal<AnnotationDraft["rect"]>();
     const selectedPage = useSignal(page);
+    const selectionStatus = useSignal("");
     const fullscreen = useSignal(false);
     const pageFromScroll = useSignal<number>();
     const renderTasks =
@@ -549,6 +550,7 @@ export const PdfReader = component$<Props>(
       const quote = selection?.toString().trim() || "";
       selectionTruncated.value = quote.length > 4_000;
       selectedText.value = quote.slice(0, 4_000);
+      selectionStatus.value = "";
       const range = selection?.rangeCount
         ? selection.getRangeAt(0).getBoundingClientRect()
         : undefined;
@@ -584,6 +586,34 @@ export const PdfReader = component$<Props>(
       selectionTruncated.value = false;
       selectedRect.value = undefined;
       window.getSelection()?.removeAllRanges();
+    });
+    const copySelection = $(async () => {
+      if (!selectedText.value) return;
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(selectedText.value);
+        } else {
+          const textarea = document.createElement("textarea");
+          textarea.value = selectedText.value;
+          textarea.setAttribute("readonly", "true");
+          textarea.style.position = "fixed";
+          textarea.style.opacity = "0";
+          document.body.appendChild(textarea);
+          try {
+            textarea.select();
+            if (!document.execCommand("copy")) throw new Error("copy failed");
+          } finally {
+            textarea.remove();
+          }
+        }
+        selectionStatus.value = localize(locale.value, "コピーしました", "Copied");
+      } catch {
+        selectionStatus.value = localize(
+          locale.value,
+          "コピーできませんでした。手動で選択してコピーしてください。",
+          "Could not copy. Select the text and copy it manually.",
+        );
+      }
     });
     const translateSelection = $(() => {
       if (!selectedText.value) return;
@@ -1006,6 +1036,14 @@ export const PdfReader = component$<Props>(
                   </button>
                   <button
                     type="button"
+                    class="button flex items-center gap-1 py-1 text-xs"
+                    onClick$={copySelection}
+                  >
+                    <Icon name="Copy" size={14} />
+                    {localize(locale.value, "コピー", "Copy")}
+                  </button>
+                  <button
+                    type="button"
                     class="button py-1 text-xs"
                     onClick$={() => annotateSelection("highlight")}
                   >
@@ -1025,6 +1063,11 @@ export const PdfReader = component$<Props>(
                   >
                     {localize(locale.value, "コメント", "Comment")}
                   </button>
+                  {selectionStatus.value && (
+                    <span role="status" class="text-emerald-700">
+                      {selectionStatus.value}
+                    </span>
+                  )}
                 </div>
               )}
             </div>

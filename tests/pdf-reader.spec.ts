@@ -156,6 +156,28 @@ test("downloads the original PDF from a narrow reader toolbar", async ({ page })
   expect(download.suggestedFilename()).toBe("reader-test.pdf");
 });
 
+test("copies selected PDF text from the reader action bar", async ({ page }) => {
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await seedPaper(page, 1);
+  await page.evaluate(() => {
+    const textLayer = document.querySelector<HTMLElement>("[data-pdf-text-layer]");
+    if (!textLayer) throw new Error("text layer not found");
+    const selection = window.getSelection()!;
+    const range = document.createRange();
+    range.selectNodeContents(textLayer);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    textLayer.closest("[data-pdf-page-shell]")?.dispatchEvent(
+      new MouseEvent("mouseup", { bubbles: true }),
+    );
+  });
+  const copyButton = page.getByRole("button", { name: "コピー", exact: true });
+  await expect(copyButton).toBeVisible();
+  await copyButton.click();
+  await expect(page.locator('[role="status"]').filter({ hasText: "コピーしました" })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain("PaperLens page 1");
+});
+
 test("keeps translation in the reader and hides implementation details", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("navigation", { name: "メインナビゲーション" })).not.toContainText("LLM");
