@@ -1,17 +1,20 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
+  "main": "./dist/_worker.js",
   "name": "paperlens",
   "compatibility_date": "2026-09-15",
   "workers_dev": true,
   "routes": [
     {
       "pattern": "paperlens.micanis.dev",
-      "custom_domain": true
-    }
+      "custom_domain": true,
+    },
   ],
   "assets": {
+    "binding": "ASSETS",
     "directory": "./dist",
+    "run_worker_first": true,
     "html_handling": "auto-trailing-slash",
-    "not_found_handling": "single-page-application"
-  }
+    "not_found_handling": "single-page-application",
+  },
 }

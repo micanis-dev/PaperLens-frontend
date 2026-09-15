@@ -159,7 +159,14 @@ test("keeps translation in the reader and hides implementation details", async (
 
 test("validates LLM settings before making a request", async ({ page }) => {
   await page.goto("/settings/#ai-connection");
-  await page.getByRole("button", { name: /User LLM \(API\)/ }).click();
+  await page.waitForLoadState("networkidle");
+  const apiDestination = page.getByRole("button", { name: /User LLM \(API\)/ });
+  await apiDestination.click();
+  // Qwik loads the event handler lazily on the first interaction. Waiting for
+  // the pressed state makes this smoke test cover the completed UI transition
+  // on both the dev server and the deployed Worker.
+  await expect(apiDestination).toHaveAttribute("aria-pressed", "true");
+  await expect(apiDestination).toHaveClass(/border-sky-500/);
   await page.getByLabel("APIプロバイダー").selectOption("openai");
   const model = page.getByLabel("モデル名（必須）");
   await expect(model).toHaveValue("");
@@ -168,11 +175,24 @@ test("validates LLM settings before making a request", async ({ page }) => {
   await page.getByRole("button", { name: "接続を確認" }).click();
   await expect(page.getByText("APIキーを入力してください")).toBeVisible();
 
-  await page.getByRole("button", { name: /User LLM \(Local\)/ }).click();
+  const localDestination = page.getByRole("button", { name: /User LLM \(Local\)/ });
+  await localDestination.click();
+  await expect(localDestination).toHaveAttribute("aria-pressed", "true");
+  await expect(localDestination).toHaveClass(/border-sky-500/);
   await page.getByLabel("モデル名（必須）").fill("llama3.2");
   await page.locator('input[inputmode="url"]').fill("https://example.com/v1");
   await page.getByRole("button", { name: "接続を確認" }).click();
   await expect(
     page.getByText("ローカルLLMの接続先はlocalhostまたはプライベートネットワークに限定してください。"),
   ).toBeVisible();
+});
+
+test("keeps narrow screens inside the viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  for (const path of ["/", "/upload/", "/llm/", "/settings/"]) {
+    await page.goto(path);
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
+      .toBeLessThanOrEqual(375);
+  }
 });
