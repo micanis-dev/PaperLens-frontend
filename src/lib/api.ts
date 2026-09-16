@@ -32,7 +32,6 @@ export type TranslationResult = {
     sequence?: number;
     translatedText: string;
     sourceTextHash: string;
-    sourceText?: string;
   }[];
   usage: {
     inputTokens?: number;
@@ -75,7 +74,10 @@ export class PaperLensApiError extends Error {
   }
 }
 
-export const apiBaseURL = (import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8080").replace(/\/$/, "");
+const viteEnv = (import.meta as ImportMeta & {
+  env?: { VITE_API_BASE_URL?: string };
+}).env;
+export const apiBaseURL = (viteEnv?.VITE_API_BASE_URL || "http://127.0.0.1:8080").replace(/\/$/, "");
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiBaseURL}${path}`, {
@@ -122,8 +124,11 @@ export function cancelAccountDeletion() {
   return request<{ requestId: string; canceled: boolean }>("/v1/account/deletion/cancel", { method: "POST", body: "{}" });
 }
 
-export function cancelManagedTranslation(id: string) {
-  return request<{ requestId: string; translation: { id: string; status: string } }>(`/v1/translations/${encodeURIComponent(id)}/cancel`, { method: "POST", body: "{}" });
+export function cancelManagedTranslation(id: string, signal?: AbortSignal) {
+  return request<{ requestId: string; translation: { id: string; status: string } }>(
+    `/v1/translations/${encodeURIComponent(id)}/cancel`,
+    { method: "POST", body: "{}", signal },
+  );
 }
 
 export type BillingPlan = {
@@ -243,6 +248,7 @@ export async function streamManagedTranslation(
   const decoder = new TextDecoder();
   let buffer = "";
   let completed: TranslationResult | undefined;
+  let canceled = false;
   const consume = (chunk: string) => {
     buffer += chunk;
     const blocks = buffer.split("\n\n");
@@ -252,7 +258,14 @@ export async function streamManagedTranslation(
       const data = block.match(/^data:\s*(.+)$/m)?.[1];
       if (!event || !data) continue;
       const parsed = JSON.parse(data) as unknown;
-      if (event === "completed") completed = (parsed as { result?: TranslationResult }).result;
+      if (event === "completed") {
+        const completion = parsed as {
+          result?: TranslationResult;
+          status?: string;
+        };
+        canceled = completion.status === "canceled";
+        completed = completion.result;
+      }
       onEvent?.({ type: event as ManagedTranslationEvent["type"], data: parsed } as ManagedTranslationEvent);
       if (event === "failed") {
         const details = parsed as ApiError;
@@ -266,5 +279,6 @@ export async function streamManagedTranslation(
     consume(decoder.decode(next.value, { stream: true }));
   }
   consume(decoder.decode());
+  if (canceled) throw new DOMException("Translation canceled", "AbortError");
   return completed;
 }

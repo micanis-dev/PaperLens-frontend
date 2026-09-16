@@ -150,9 +150,13 @@ export type PaperBundle = { paper: PaperDocument; file?: PaperFile; annotations:
 
 /** Persist a complete import in one IndexedDB transaction. If any paper or
  * related record fails, the browser keeps the previous library intact. */
-export async function savePaperBundles(bundles: PaperBundle[]) {
+export async function savePaperBundles(
+	bundles: PaperBundle[],
+	options: { replaceRelated?: boolean } = {},
+) {
 	assertWritable();
 	const db = await getPaperLensDB();
+	const replaceRelated = options.replaceRelated === true;
 	const tx = db.transaction(["papers", "files", "annotations", "translations"], "readwrite");
 	try {
 		const existingIDs = new Set(await tx.objectStore("papers").getAllKeys());
@@ -171,7 +175,19 @@ export async function savePaperBundles(bundles: PaperBundle[]) {
 				sha256: bundle.file.sha256,
 				textByPage: bundle.file.textByPage ? Object.fromEntries(Object.entries(bundle.file.textByPage)) : undefined,
 			} satisfies PaperFile : undefined;
+			if (replaceRelated) {
+				// A ZIP backup is a complete snapshot for this paper. Remove related
+				// records first so data created after the backup cannot survive a
+				// restore and get mixed into the restored snapshot.
+				const annotationKeys = await tx.objectStore("annotations").index("by-document").getAllKeys(bundle.paper.id);
+				for (const key of annotationKeys) await tx.objectStore("annotations").delete(key);
+				const translationKeys = await tx.objectStore("translations").index("by-document").getAllKeys(bundle.paper.id);
+				for (const key of translationKeys) await tx.objectStore("translations").delete(key);
+			}
 			await tx.objectStore("papers").put(storedPaper);
+			// Some older ZIPs may contain metadata without the original PDF.
+			// Preserve an existing local file in that case; an incomplete backup
+			// must never make a recoverable PDF disappear.
 			if (storedFile) await tx.objectStore("files").put(storedFile);
 			for (const annotation of bundle.annotations) await tx.objectStore("annotations").put(JSON.parse(JSON.stringify(annotation)), annotation.id);
 			for (const translation of bundle.translations) await tx.objectStore("translations").put(JSON.parse(JSON.stringify(translation)), translation.id);

@@ -73,7 +73,7 @@ export default component$(() => {
     localize(locale.value, japanese, english);
   const language = useSignal("ja");
   const viewMode = useSignal<"continuous" | "single">("continuous");
-  const storageInfo = useSignal("確認中…");
+  const storageInfo = useSignal(t("確認中…", "Checking…"));
   const storageState = useSignal<"checking" | "ready" | "unavailable">(
     "checking",
   );
@@ -110,7 +110,11 @@ export default component$(() => {
       apiKey.value = getSessionProvider()?.apiKey || "";
     } catch {
       storageState.value = "unavailable";
-      storageInfo.value = "このブラウザでは端末内保存を利用できません";
+      storageInfo.value = localize(
+        locale.value,
+        "このブラウザでは端末内保存を利用できません",
+        "Local storage is unavailable in this browser.",
+      );
       return;
     }
     try {
@@ -118,15 +122,39 @@ export default component$(() => {
       storageState.value = isStorageReadOnly() ? "unavailable" : "ready";
     } catch {
       storageState.value = "unavailable";
-      storageInfo.value = "このブラウザでは端末内保存を利用できません";
+      storageInfo.value = localize(
+        locale.value,
+        "このブラウザでは端末内保存を利用できません",
+        "Local storage is unavailable in this browser.",
+      );
       return;
     }
     if (!navigator.storage?.estimate)
-      storageInfo.value = "このブラウザでは使用量を取得できません";
+      storageInfo.value = localize(
+        locale.value,
+        "このブラウザでは使用量を取得できません",
+        "Storage usage cannot be measured in this browser.",
+      );
     else {
       const estimate = await navigator.storage.estimate();
       const ratio = estimate.quota ? (estimate.usage || 0) / estimate.quota : 0;
-      storageInfo.value = `${Math.round((estimate.usage || 0) / 1024 / 1024)}MB / ${estimate.quota ? `${Math.round(estimate.quota / 1024 / 1024)}MB` : "上限不明"}${isStorageReadOnly() ? " · 読み取り専用" : ratio >= 0.95 ? " · 空き容量がありません" : ratio >= 0.8 ? " · 空き容量が少なくなっています" : ""}`;
+      const storageStatus = isStorageReadOnly()
+        ? localize(locale.value, " · 読み取り専用", " · Read-only")
+        : ratio >= 0.95
+          ? localize(locale.value, " · 空き容量がありません", " · Storage full")
+          : ratio >= 0.8
+            ? localize(
+                locale.value,
+                " · 空き容量が少なくなっています",
+                " · Storage running low",
+              )
+            : "";
+      const quota = estimate.quota
+        ? `${Math.round(estimate.quota / 1024 / 1024)}MB`
+        : localize(locale.value, "上限不明", "quota unknown");
+      storageInfo.value = `${Math.round(
+        (estimate.usage || 0) / 1024 / 1024,
+      )}MB / ${quota}${storageStatus}`;
     }
     try {
       const response = await getAccount();
@@ -135,7 +163,17 @@ export default component$(() => {
       linkedIdentities.value = (await getLinkedIdentities()).identities;
     } catch (error) {
       if (error instanceof Error && "details" in error && (error as { details?: { code?: string } }).details?.code === "unauthorized") accountState.value = "signed-out";
-      else { accountState.value = "unknown"; accountError.value = error instanceof Error ? error.message : "アカウント情報を取得できませんでした"; }
+      else {
+        accountState.value = "unknown";
+        accountError.value =
+          error instanceof Error
+            ? error.message
+            : localize(
+                locale.value,
+                "アカウント情報を取得できませんでした",
+                "Could not load account information.",
+              );
+      }
     }
   });
   const updateProvider = $((patch: Partial<ProviderSettings>) => {
@@ -271,14 +309,24 @@ export default component$(() => {
     }
   });
   const unlinkSSO = $(async (provider: LinkedIdentity["provider"]) => {
-    if (!window.confirm(`${provider}のSSO連携を解除しますか？`)) return;
+    if (
+      !window.confirm(
+        locale.value === "en"
+          ? `Unlink ${provider} SSO?`
+          : `${provider}のSSO連携を解除しますか？`,
+      )
+    )
+      return;
     identityBusy.value = provider;
     try {
       await unlinkIdentity(provider);
       linkedIdentities.value = linkedIdentities.value.filter(
         (item) => item.provider !== provider,
       );
-      authMessage.value = `${provider}のSSO連携を解除しました。`;
+      authMessage.value =
+        locale.value === "en"
+          ? `${provider} SSO unlinked.`
+          : `${provider}のSSO連携を解除しました。`;
     } catch (error) {
       authMessage.value =
         error instanceof Error
@@ -336,7 +384,9 @@ export default component$(() => {
     anchor.click();
     URL.revokeObjectURL(url);
     message.value =
-      "メタデータをエクスポートしました。PDF本体は論文ごとの元ファイルとして管理されます。";
+      locale.value === "en"
+        ? "Paper metadata exported. PDFs are managed as original files per paper."
+        : "メタデータをエクスポートしました。PDF本体は論文ごとの元ファイルとして管理されます。";
   });
   const exportZip = $(async () => {
     const controller = new AbortController();
@@ -359,11 +409,17 @@ export default component$(() => {
       anchor.click();
       URL.revokeObjectURL(url);
       message.value =
-        "PDF・抽出本文・メタデータ・翻訳・注釈をZIPにエクスポートしました。";
+        locale.value === "en"
+          ? "PDFs, extracted text, metadata, translations, and annotations exported to ZIP."
+          : "PDF・抽出本文・メタデータ・翻訳・注釈をZIPにエクスポートしました。";
     } catch (e) {
       message.value =
         e instanceof DOMException && e.name === "AbortError"
-          ? "ZIPエクスポートをキャンセルしました"
+          ? localize(
+              locale.value,
+              "ZIPエクスポートをキャンセルしました",
+              "ZIP export canceled.",
+            )
           : e instanceof Error
             ? e.message
             : "ZIPエクスポートに失敗しました";
@@ -382,10 +438,22 @@ export default component$(() => {
         const existingIDs = new Set((await listPapers()).map((paper) => paper.id));
         const overwriteCount = preview.ids.filter((id) => existingIDs.has(id)).length;
         const addCount = preview.count - overwriteCount;
-        const sample = preview.titles.slice(0, 3).join("、");
-        if (!window.confirm(`${file.name}を復元しますか？追加 ${addCount}件・上書き ${overwriteCount}件。${sample ? `対象: ${sample}${preview.count > 3 ? "…" : ""}。` : ""}既存の同じIDの論文情報は上書きされます。`)) return;
+        const sample = preview.titles
+          .slice(0, 3)
+          .join(locale.value === "en" ? ", " : "、");
+        if (
+          !window.confirm(
+            locale.value === "en"
+              ? `Restore ${file.name}? Add ${addCount} and overwrite ${overwriteCount} papers.${sample ? ` Included: ${sample}${preview.count > 3 ? "…" : ""}.` : ""} Existing papers with the same IDs will be overwritten.`
+              : `${file.name}を復元しますか？追加 ${addCount}件・上書き ${overwriteCount}件。${sample ? `対象: ${sample}${preview.count > 3 ? "…" : ""}。` : ""}既存の同じIDの論文情報は上書きされます。`,
+          )
+        )
+          return;
         const count = await importBackupZip(file);
-        message.value = `${count}件の論文をPDF・メタデータごと復元しました。`;
+        message.value =
+          locale.value === "en"
+            ? `Restored ${count} papers with PDFs and metadata.`
+            : `${count}件の論文をPDF・メタデータごと復元しました。`;
         return;
       }
       const parsed = JSON.parse(await file.text()) as {
@@ -402,7 +470,14 @@ export default component$(() => {
         return result.success && existingIDs.has(result.data.id);
       }).length;
       const addCount = parsed.papers.length - overwriteCount;
-      if (!window.confirm(`${file.name}を復元しますか？追加 ${addCount}件・上書き ${overwriteCount}件。既存の同じIDの論文情報は置き換わります。`)) return;
+      if (
+        !window.confirm(
+          locale.value === "en"
+            ? `Restore ${file.name}? Add ${addCount} and overwrite ${overwriteCount} papers. Existing papers with the same IDs will be replaced.`
+            : `${file.name}を復元しますか？追加 ${addCount}件・上書き ${overwriteCount}件。既存の同じIDの論文情報は置き換わります。`,
+        )
+      )
+        return;
       const bundles = parsed.papers.map((candidate) => {
         const result = paperDocumentSchema.safeParse(candidate);
         if (!result.success)
@@ -410,7 +485,10 @@ export default component$(() => {
         return { paper: result.data, annotations: [], translations: [] };
       });
       await savePaperBundles(bundles);
-      message.value = `${parsed.papers.length}件のメタデータを復元しました。PDF本体は元ファイルを再登録してください。`;
+      message.value =
+        locale.value === "en"
+          ? `Restored metadata for ${parsed.papers.length} papers. Re-register the original PDFs.`
+          : `${parsed.papers.length}件のメタデータを復元しました。PDF本体は元ファイルを再登録してください。`;
     } catch (e) {
       message.value =
         e instanceof Error ? e.message : "インポートに失敗しました";
@@ -421,7 +499,9 @@ export default component$(() => {
   const clearData = $(async () => {
     if (
       !window.confirm(
-        "この端末のライブラリ、PDF、翻訳、注釈、設定をすべて削除しますか？この操作は元に戻せません。バックアップを先に作成してください。",
+        locale.value === "en"
+          ? "Delete this device's library, PDFs, translations, annotations, and settings? This cannot be undone. Create a backup first."
+          : "この端末のライブラリ、PDF、翻訳、注釈、設定をすべて削除しますか？この操作は元に戻せません。バックアップを先に作成してください。",
       )
     )
       return;
@@ -431,7 +511,10 @@ export default component$(() => {
       provider.value = defaultProvider;
       linkedIdentities.value = [];
       deletion.value = undefined;
-      message.value = "ローカルデータを削除しました。";
+      message.value =
+        locale.value === "en"
+          ? "Local data deleted."
+          : "ローカルデータを削除しました。";
     } catch (error) {
       message.value =
         error instanceof Error
@@ -446,7 +529,9 @@ export default component$(() => {
       linkedIdentities.value = [];
       deletion.value = undefined;
       authMessage.value =
-        "ログアウトしました。ローカルライブラリはそのまま利用できます。";
+        locale.value === "en"
+          ? "Logged out. Your local library remains available."
+          : "ログアウトしました。ローカルライブラリはそのまま利用できます。";
     } catch (error) {
       authMessage.value =
         error instanceof Error ? error.message : "ログアウトできませんでした";
@@ -455,14 +540,19 @@ export default component$(() => {
   const requestDeletion = $(async () => {
     if (
       !window.confirm(
-        "アカウントとサーバー上の課金・使用量データを削除予約しますか？24時間以内なら取り消せます。端末内のPDFは削除されません。",
+        locale.value === "en"
+          ? "Schedule deletion of your account and server-side billing and usage data? You can cancel within 24 hours. PDFs on this device will not be deleted."
+          : "アカウントとサーバー上の課金・使用量データを削除予約しますか？24時間以内なら取り消せます。端末内のPDFは削除されません。",
       )
     )
       return;
     deletionBusy.value = true;
     try {
       deletion.value = (await requestAccountDeletion()).deletion;
-      authMessage.value = "削除を予約しました。";
+      authMessage.value =
+        locale.value === "en"
+          ? "Account deletion scheduled."
+          : "削除を予約しました。";
     } catch (error) {
       authMessage.value =
         error instanceof Error
@@ -477,7 +567,10 @@ export default component$(() => {
     try {
       await cancelAccountDeletion();
       deletion.value = undefined;
-      authMessage.value = "アカウント削除を取り消しました。";
+      authMessage.value =
+        locale.value === "en"
+          ? "Account deletion canceled."
+          : "アカウント削除を取り消しました。";
     } catch (error) {
       authMessage.value =
         error instanceof Error

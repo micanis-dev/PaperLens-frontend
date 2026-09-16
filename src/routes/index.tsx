@@ -60,10 +60,26 @@ export default component$(() => {
   const favoriteOnly = useSignal(
     location.url.searchParams.get("favorite") === "true",
   );
-  const sort = useSignal<"recent" | "updated" | "rating" | "title">((location.url.searchParams.get("sort") as "recent" | "updated" | "rating" | "title") || "recent");
+  const sort = useSignal<"recent" | "updated" | "rating" | "title">(
+    (location.url.searchParams.get("sort") as
+      | "recent"
+      | "updated"
+      | "rating"
+      | "title") || "recent",
+  );
   const selectedTag = useSignal(location.url.searchParams.get("tag") || "");
-  const rating = useSignal<"" | "1" | "2" | "3" | "4" | "5">((location.url.searchParams.get("rating") || "") as "" | "1" | "2" | "3" | "4" | "5");
-  const dateFilter = useSignal<"" | "7" | "30" | "365">((location.url.searchParams.get("days") || "") as "" | "7" | "30" | "365");
+  const rating = useSignal<"" | "1" | "2" | "3" | "4" | "5">(
+    (location.url.searchParams.get("rating") || "") as
+      | ""
+      | "1"
+      | "2"
+      | "3"
+      | "4"
+      | "5",
+  );
+  const dateFilter = useSignal<"" | "7" | "30" | "365">(
+    (location.url.searchParams.get("days") || "") as "" | "7" | "30" | "365",
+  );
   const loading = useSignal(true);
   const error = useSignal("");
   const searchIndex = useSignal<SearchIndexEntry[]>([]);
@@ -138,8 +154,35 @@ export default component$(() => {
       searchIndex.value = await buildSearchIndex(indexed);
       searchIndexReady.value = true;
     } catch (caught) {
-      searchIndexError.value = caught instanceof Error ? caught.message : "全文検索を準備できませんでした";
+      searchIndexError.value =
+        caught instanceof Error
+          ? caught.message
+          : "全文検索を準備できませんでした";
     }
+  });
+  // Keep the library view shareable and preserve its state when the reader's
+  // "back to results" link is used. This intentionally replaces the current
+  // entry instead of adding a history entry for every keystroke/filter click.
+  // eslint-disable-next-line qwik/no-use-visible-task
+  useVisibleTask$(({ track }) => {
+    track(() => query.value);
+    track(() => status.value);
+    track(() => favoriteOnly.value);
+    track(() => selectedTag.value);
+    track(() => rating.value);
+    track(() => dateFilter.value);
+    track(() => sort.value);
+    const params = new URLSearchParams();
+    if (query.value.trim()) params.set("q", query.value.trim());
+    if (status.value) params.set("status", status.value);
+    if (favoriteOnly.value) params.set("favorite", "true");
+    if (selectedTag.value) params.set("tag", selectedTag.value);
+    if (rating.value) params.set("rating", rating.value);
+    if (dateFilter.value) params.set("days", dateFilter.value);
+    if (sort.value !== "recent") params.set("sort", sort.value);
+    const nextUrl = `${location.url.pathname}${params.toString() ? `?${params}` : ""}`;
+    if (`${window.location.pathname}${window.location.search}` !== nextUrl)
+      window.history.replaceState(null, "", nextUrl);
   });
   const updatePaper = $(
     async (paper: PaperDocument, patch: Partial<PaperDocument>) => {
@@ -262,13 +305,21 @@ export default component$(() => {
     URL.revokeObjectURL(url);
   });
   const deletePaper = $(async (paper: PaperDocument) => {
-    if (!window.confirm(`${paper.title || paper.fileName}をこの端末から削除しますか？PDF、翻訳、注釈も削除されます。`)) return;
+    if (
+      !window.confirm(
+        locale.value === "en"
+          ? `Delete ${paper.title || paper.fileName} from this device? The PDF, translations, and annotations will also be deleted.`
+          : `${paper.title || paper.fileName}をこの端末から削除しますか？PDF、翻訳、注釈も削除されます。`,
+      )
+    )
+      return;
     removingPaper.value = paper.id;
     try {
       await removePaper(paper.id);
       papers.value = papers.value.filter((item) => item.id !== paper.id);
     } catch (caught) {
-      error.value = caught instanceof Error ? caught.message : "論文を削除できませんでした";
+      error.value =
+        caught instanceof Error ? caught.message : "論文を削除できませんでした";
     } finally {
       removingPaper.value = "";
     }
@@ -276,7 +327,10 @@ export default component$(() => {
   const downloadPaper = $(async (paper: PaperDocument) => {
     try {
       const blob = downloadableFiles.value[paper.id];
-      if (!blob) throw new Error("この論文のPDF本体を準備中です。少し待ってから再試行してください。");
+      if (!blob)
+        throw new Error(
+          "この論文のPDF本体を準備中です。少し待ってから再試行してください。",
+        );
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
@@ -284,7 +338,10 @@ export default component$(() => {
       anchor.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
     } catch (caught) {
-      error.value = caught instanceof Error ? caught.message : "PDFをダウンロードできませんでした";
+      error.value =
+        caught instanceof Error
+          ? caught.message
+          : "PDFをダウンロードできませんでした";
     }
   });
   return (
@@ -296,7 +353,8 @@ export default component$(() => {
               {message(locale.value, "libraryTitle")}
             </h1>
             <p class="mt-2 text-sm text-slate-500">
-              {message(locale.value, "libraryDescription")} · {message(locale.value, "localDescription")}
+              {message(locale.value, "libraryDescription")} ·{" "}
+              {message(locale.value, "localDescription")}
             </p>
           </div>
           <Link href="/upload/" class="button primary">
@@ -467,9 +525,17 @@ export default component$(() => {
               )}
             </div>
             {!searchIndexReady.value && !searchIndexError.value && (
-              <p class="mt-2 text-xs text-slate-400" role="status">{locale.value === "en" ? "Preparing full-text search…" : "本文検索を準備しています…"}</p>
+              <p class="mt-2 text-xs text-slate-400" role="status">
+                {locale.value === "en"
+                  ? "Preparing full-text search…"
+                  : "本文検索を準備しています…"}
+              </p>
             )}
-            {searchIndexError.value && <p class="mt-2 text-xs text-red-700" role="alert">{searchIndexError.value}</p>}
+            {searchIndexError.value && (
+              <p class="mt-2 text-xs text-red-700" role="alert">
+                {searchIndexError.value}
+              </p>
+            )}
           </div>
         )}
         {(loading.value || papers.value.length > 0) && (
@@ -573,9 +639,20 @@ export default component$(() => {
                         <span class="font-semibold text-sky-700">
                           {locations.join(", ")}
                         </span>{" "}
-                        · {(() => {
+                        ·{" "}
+                        {(() => {
                           const hit = excerpt.toLowerCase().indexOf(needle);
-                          return hit >= 0 ? <>{excerpt.slice(0, hit)}<mark class="bg-sky-100 text-slate-950">{excerpt.slice(hit, hit + needle.length)}</mark>{excerpt.slice(hit + needle.length)}</> : excerpt;
+                          return hit >= 0 ? (
+                            <>
+                              {excerpt.slice(0, hit)}
+                              <mark class="bg-sky-100 text-slate-950">
+                                {excerpt.slice(hit, hit + needle.length)}
+                              </mark>
+                              {excerpt.slice(hit + needle.length)}
+                            </>
+                          ) : (
+                            excerpt
+                          );
                         })()}
                       </p>
                     )}
@@ -588,19 +665,63 @@ export default component$(() => {
                   <div class="mt-2 space-y-2 border border-slate-200 bg-slate-50 p-3">
                     <label class="block text-xs font-semibold">
                       {locale.value === "en" ? "Title" : "タイトル"}
-                      <input class="mt-1 w-full px-2 py-1 text-xs" value={paper.title} onChange$={(_, el) => updatePaper(paper, { title: el.value })} />
+                      <input
+                        class="mt-1 w-full px-2 py-1 text-xs"
+                        value={paper.title}
+                        onChange$={(_, el) =>
+                          updatePaper(paper, { title: el.value })
+                        }
+                      />
                     </label>
                     <label class="block text-xs font-semibold">
                       {locale.value === "en" ? "Authors" : "著者"}
-                      <input class="mt-1 w-full px-2 py-1 text-xs" value={paper.authors.join(", ")} onChange$={(_, el) => updatePaper(paper, { authors: el.value.split(",").map((item) => item.trim()).filter(Boolean) })} />
+                      <input
+                        class="mt-1 w-full px-2 py-1 text-xs"
+                        value={paper.authors.join(", ")}
+                        onChange$={(_, el) =>
+                          updatePaper(paper, {
+                            authors: el.value
+                              .split(",")
+                              .map((item) => item.trim())
+                              .filter(Boolean),
+                          })
+                        }
+                      />
                     </label>
                     <label class="block text-xs font-semibold">
                       {locale.value === "en" ? "Tags" : "タグ"}
-                      <input class="mt-1 w-full px-2 py-1 text-xs" value={paper.tags.join(", ")} placeholder="ai, review" onChange$={(_, el) => updatePaper(paper, { tags: el.value.split(",").map((item) => item.trim()).filter(Boolean) })} />
+                      <input
+                        class="mt-1 w-full px-2 py-1 text-xs"
+                        value={paper.tags.join(", ")}
+                        placeholder="ai, review"
+                        onChange$={(_, el) =>
+                          updatePaper(paper, {
+                            tags: el.value
+                              .split(",")
+                              .map((item) => item.trim())
+                              .filter(Boolean),
+                          })
+                        }
+                      />
                     </label>
                     <label class="block text-xs font-semibold">
                       {locale.value === "en" ? "Publication year" : "出版年"}
-                      <input class="mt-1 w-full px-2 py-1 text-xs" type="number" min={0} max={9999} value={paper.publicationYear || ""} onChange$={(_, el) => { const value = Number(el.value); void updatePaper(paper, { publicationYear: Number.isInteger(value) && value > 0 ? value : undefined }); }} />
+                      <input
+                        class="mt-1 w-full px-2 py-1 text-xs"
+                        type="number"
+                        min={0}
+                        max={9999}
+                        value={paper.publicationYear || ""}
+                        onChange$={(_, el) => {
+                          const value = Number(el.value);
+                          void updatePaper(paper, {
+                            publicationYear:
+                              Number.isInteger(value) && value > 0
+                                ? value
+                                : undefined,
+                          });
+                        }}
+                      />
                     </label>
                   </div>
                 </details>
@@ -643,13 +764,26 @@ export default component$(() => {
                   </div>
                   <div class="flex flex-wrap items-center justify-end gap-3">
                     <select
-                      aria-label={`${paper.title || paper.fileName}の読書状態`}
+                      aria-label={
+                        locale.value === "en"
+                          ? `${paper.title || paper.fileName} reading status`
+                          : `${paper.title || paper.fileName}の読書状態`
+                      }
                       class="library-reading-status h-8 w-28 shrink-0 px-2 py-1 text-xs"
                       value={paper.readingStatus}
                       disabled={!!pendingPaperWrites.value[paper.id]}
-                      onChange$={(_, el) => updatePaper(paper, { readingStatus: el.value as PaperDocument["readingStatus"] })}
+                      onChange$={(_, el) =>
+                        updatePaper(paper, {
+                          readingStatus:
+                            el.value as PaperDocument["readingStatus"],
+                        })
+                      }
                     >
-                      {Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                      {Object.entries(statusLabels).map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
                     </select>
                     <span class="text-xs text-slate-400">
                       {paper.lastOpenedAt
@@ -678,7 +812,11 @@ export default component$(() => {
                     <button
                       type="button"
                       class="flex size-11 items-center justify-center text-slate-300 hover:text-red-700"
-                      aria-label={`${paper.title || paper.fileName}を削除`}
+                      aria-label={
+                        locale.value === "en"
+                          ? `Delete ${paper.title || paper.fileName}`
+                          : `${paper.title || paper.fileName}を削除`
+                      }
                       disabled={removingPaper.value === paper.id}
                       onClick$={() => deletePaper(paper)}
                     >

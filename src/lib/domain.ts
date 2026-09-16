@@ -66,6 +66,7 @@ export const paperDocumentSchema = z.object({
     .object({
       page: z.number().int().positive(),
       zoom: z.number().positive(),
+      fitMode: z.enum(["manual", "page", "width", "height"]).optional(),
       viewMode: z.enum(["continuous", "single"]),
       layout: z.enum(["split", "stack", "pdf", "text"]).optional(),
     })

@@ -1,6 +1,7 @@
 import {
   $,
   component$,
+  noSerialize,
   Slot,
   useSignal,
   useVisibleTask$,
@@ -56,8 +57,14 @@ export const OpenTabs = component$<{ variant?: "shell" | "reader" }>(
         // Opening a paper should not reorder the user's working set. Append
         // only when it was not already open.
         tabs.value = storedTabs.some((tab) => tab.id === id)
-          ? storedTabs.map((tab) => tab.id === id ? { ...tab, title: paper.title || paper.fileName } : tab)
-          : [...existing, { id, title: paper.title || paper.fileName }].slice(-8);
+          ? storedTabs.map((tab) =>
+              tab.id === id
+                ? { ...tab, title: paper.title || paper.fileName }
+                : tab,
+            )
+          : [...existing, { id, title: paper.title || paper.fileName }].slice(
+              -8,
+            );
         try {
           await saveSetting("openTabs", tabs.value);
         } catch {
@@ -143,7 +150,7 @@ export const OpenTabs = component$<{ variant?: "shell" | "reader" }>(
               class={
                 location.params.id === tab.id
                   ? variant === "reader"
-                  ? "max-w-[min(28rem,60vw)] truncate border-b-2 border-sky-300 px-2.5 py-1.5 text-[11px] font-semibold text-white"
+                    ? "max-w-[min(28rem,60vw)] truncate border-b-2 border-sky-300 px-2.5 py-1.5 text-[11px] font-semibold text-white"
                     : "max-w-[min(28rem,60vw)] truncate border-b-2 border-sky-400 px-3 py-3 text-xs font-semibold text-slate-950"
                   : variant === "reader"
                     ? "max-w-[min(28rem,60vw)] truncate px-2.5 py-1.5 text-[11px] text-white/75 hover:text-white"
@@ -176,6 +183,7 @@ export const QuickSwitcher = component$(() => {
   const locale = useLocale();
   const open = useSignal(false);
   const query = useSignal("");
+  const returnFocus = useSignal<HTMLElement>();
   const tabs = useSignal<{ id: string; title: string }[]>([]);
   const papers = useSignal<SwitcherPaper[]>([]);
   const loadCandidates = $(async () => {
@@ -197,6 +205,11 @@ export const QuickSwitcher = component$(() => {
       });
     }
   });
+  const close = $(() => {
+    open.value = false;
+    const target = returnFocus.value;
+    if (target) window.setTimeout(() => target.focus(), 0);
+  });
   // Quick-switcher data is browser-local.
   // eslint-disable-next-line qwik/no-use-visible-task
   useVisibleTask$(() => {
@@ -208,7 +221,13 @@ export const QuickSwitcher = component$(() => {
   useVisibleTask$(({ track, cleanup }) => {
     track(() => open.value);
     if (!open.value) return;
-    const timer = window.setTimeout(() => document.querySelector<HTMLElement>("[data-quick-switcher] input")?.focus(), 0);
+    const timer = window.setTimeout(
+      () =>
+        document
+          .querySelector<HTMLElement>("[data-quick-switcher] input")
+          ?.focus(),
+      0,
+    );
     cleanup(() => window.clearTimeout(timer));
   });
   // eslint-disable-next-line qwik/no-use-visible-task
@@ -216,18 +235,36 @@ export const QuickSwitcher = component$(() => {
     const handleKeydown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
+        if (!open.value)
+          returnFocus.value = noSerialize(
+            document.activeElement as HTMLElement,
+          );
         open.value = true;
         query.value = "";
         void loadCandidates();
       }
-      if (event.key === "Escape") open.value = false;
+      if (event.key === "Escape" && open.value) close();
       if (open.value && event.key === "Tab") {
-        const dialog = document.querySelector<HTMLElement>("[data-quick-switcher]");
-        const focusable = dialog ? Array.from(dialog.querySelectorAll<HTMLElement>("a,button,input,[tabindex]:not([tabindex='-1'])")) : [];
+        const dialog = document.querySelector<HTMLElement>(
+          "[data-quick-switcher]",
+        );
+        const focusable = dialog
+          ? Array.from(
+              dialog.querySelectorAll<HTMLElement>(
+                "a,button,input,[tabindex]:not([tabindex='-1'])",
+              ),
+            )
+          : [];
         if (focusable.length) {
-          const first = focusable[0], last = focusable[focusable.length - 1];
-          if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-          else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+          const first = focusable[0],
+            last = focusable[focusable.length - 1];
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+          }
         }
       }
     };
@@ -283,7 +320,7 @@ export const QuickSwitcher = component$(() => {
       role="dialog"
       aria-modal="true"
       aria-label={message(locale.value, "quickSwitcher")}
-      onClick$={() => (open.value = false)}
+      onClick$={close}
     >
       <div
         data-quick-switcher
@@ -313,7 +350,7 @@ export const QuickSwitcher = component$(() => {
                 key={item.href}
                 href={item.href}
                 class="flex items-center gap-3 border-l-2 border-transparent px-3 py-3 text-sm hover:border-sky-400 hover:bg-sky-50"
-                onClick$={() => (open.value = false)}
+                onClick$={close}
               >
                 <span class="min-w-0 flex-1 truncate">{item.title}</span>
                 <span class="shrink-0 text-[10px] text-slate-400">
@@ -366,6 +403,8 @@ const sectionTitle = (pathname: string, locale: Locale) => {
 export const AppShell = component$(() => {
   const mobileOpen = useSignal(false);
   const isMobile = useSignal(false);
+  const menuTrigger = useSignal<HTMLButtonElement>();
+  const mobileNav = useSignal<HTMLElement>();
   const locale = useLocale();
   const location = useLocation();
   const isReader = location.url.pathname.startsWith("/papers/");
@@ -379,7 +418,10 @@ export const AppShell = component$(() => {
     const sync = () => (isMobile.value = media.matches);
     sync();
     const onKeydown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && isMobile.value) mobileOpen.value = false;
+      if (event.key === "Escape" && isMobile.value && mobileOpen.value) {
+        mobileOpen.value = false;
+        menuTrigger.value?.focus();
+      }
     };
     media.addEventListener("change", sync);
     window.addEventListener("keydown", onKeydown);
@@ -387,6 +429,44 @@ export const AppShell = component$(() => {
       media.removeEventListener("change", sync);
       window.removeEventListener("keydown", onKeydown);
     });
+  });
+  // Keep keyboard focus inside the newly opened navigation and return it to
+  // the trigger after closing. The inert attribute handles the closed state;
+  // this also makes Escape and link activation predictable for keyboard users.
+  // eslint-disable-next-line qwik/no-use-visible-task
+  useVisibleTask$(({ track, cleanup }) => {
+    track(() => mobileOpen.value);
+    if (!mobileOpen.value) return;
+    const frame = requestAnimationFrame(() => {
+      mobileNav.value?.querySelector<HTMLElement>("a,button")?.focus();
+    });
+    const onKeydown = (event: KeyboardEvent) => {
+      if (event.key !== "Tab" || !mobileNav.value) return;
+      const focusable = Array.from(
+        mobileNav.value.querySelectorAll<HTMLElement>(
+          "a,button,input,select,textarea,[tabindex]:not([tabindex='-1'])",
+        ),
+      ).filter((element) => !element.hasAttribute("disabled"));
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", onKeydown);
+    cleanup(() => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("keydown", onKeydown);
+    });
+  });
+  const closeMobileMenu = $(() => {
+    mobileOpen.value = false;
+    if (isMobile.value) menuTrigger.value?.focus();
   });
   const isActive = (href: string) => {
     if (href === "/")
@@ -408,13 +488,14 @@ export const AppShell = component$(() => {
           "fixed inset-0 z-30 bg-slate-950/20 lg:hidden",
           mobileOpen.value ? "opacity-100" : "pointer-events-none opacity-0",
         )}
-        aria-label="メニューを閉じる"
+        aria-label={message(locale.value, "close")}
         aria-hidden={!mobileOpen.value ? "true" : undefined}
         tabIndex={mobileOpen.value ? 0 : -1}
-        onClick$={() => (mobileOpen.value = false)}
+        onClick$={closeMobileMenu}
       />
       <aside
         data-mobile-nav
+        ref={mobileNav}
         inert={isMobile.value && !mobileOpen.value ? true : undefined}
         aria-hidden={isMobile.value && !mobileOpen.value ? "true" : undefined}
         class={cn(
@@ -426,7 +507,7 @@ export const AppShell = component$(() => {
           <Link
             href="/"
             class="flex items-center gap-3"
-            onClick$={() => (mobileOpen.value = false)}
+            onClick$={closeMobileMenu}
           >
             {/* Shared vector artwork needs no raster image optimization. */}
             <img
@@ -442,8 +523,8 @@ export const AppShell = component$(() => {
           <button
             type="button"
             class="p-2 text-slate-500 lg:hidden"
-            aria-label="メニューを閉じる"
-            onClick$={() => (mobileOpen.value = false)}
+            aria-label={message(locale.value, "close")}
+            onClick$={closeMobileMenu}
           >
             <Icon name="X" size={18} />
           </button>
@@ -451,7 +532,7 @@ export const AppShell = component$(() => {
         <Link
           href="/upload/"
           class="button primary mb-8 w-full"
-          onClick$={() => (mobileOpen.value = false)}
+          onClick$={closeMobileMenu}
         >
           <Icon name="Plus" size={17} />
           {message(locale.value, "addPaper")}
@@ -476,7 +557,7 @@ export const AppShell = component$(() => {
                     : "border-transparent text-slate-500",
                 )}
                 aria-current={isActive(item.href) ? "page" : undefined}
-                onClick$={() => (mobileOpen.value = false)}
+                onClick$={closeMobileMenu}
               >
                 <Icon name={item.icon} size={18} />
                 <span>{item.label}</span>
@@ -495,7 +576,7 @@ export const AppShell = component$(() => {
                 : "border-transparent text-slate-500",
             )}
             aria-current={isActive("/settings/") ? "page" : undefined}
-            onClick$={() => (mobileOpen.value = false)}
+            onClick$={closeMobileMenu}
           >
             <Icon name="Settings2" size={18} />
             {message(locale.value, "settings")}
@@ -507,13 +588,23 @@ export const AppShell = component$(() => {
           <button
             type="button"
             data-mobile-menu-trigger
+            ref={menuTrigger}
             class="flex size-10 items-center justify-center text-slate-500 lg:hidden"
             aria-label={locale.value === "en" ? "Open menu" : "メニューを開く"}
             onClick$={() => (mobileOpen.value = true)}
           >
             <Icon name="Menu" size={20} />
           </button>
-          <button type="button" class="ml-2 flex size-10 items-center justify-center text-slate-500" aria-label={message(locale.value, "quickSwitcher")} onClick$={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }))}>
+          <button
+            type="button"
+            class="ml-2 flex size-10 items-center justify-center text-slate-500"
+            aria-label={message(locale.value, "quickSwitcher")}
+            onClick$={() =>
+              window.dispatchEvent(
+                new KeyboardEvent("keydown", { key: "k", ctrlKey: true }),
+              )
+            }
+          >
             <Icon name="Search" size={18} />
           </button>
           <span class="ml-2 text-sm font-semibold text-slate-950">

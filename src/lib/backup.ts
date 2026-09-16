@@ -27,20 +27,31 @@ export async function inspectBackupZip(file: File) {
 
 export async function exportBackupZip(options?: { signal?: AbortSignal; onProgress?: (completed: number, total: number) => void }) {
   const { strToU8 } = await import("fflate");
+  const throwIfAborted = () => {
+    if (options?.signal?.aborted)
+      throw new DOMException("バックアップ生成をキャンセルしました", "AbortError");
+  };
+  throwIfAborted();
   const papers = await listPapers();
+  throwIfAborted();
   const files: Record<string, Uint8Array> = {};
   const manifest = { schemaVersion: 1, exportedAt: new Date().toISOString(), paperIds: papers.map((paper) => paper.id) };
   files["manifest.json"] = strToU8(JSON.stringify(manifest, null, 2));
   let total = files["manifest.json"].byteLength;
   for (const paper of papers) {
+    throwIfAborted();
     files[`papers/${paper.id}.json`] = strToU8(JSON.stringify(paper));
     const file = await getPaperFile(paper.id);
+    throwIfAborted();
     if (file) {
       files[`papers/${paper.id}.pdf`] = new Uint8Array(await file.file.arrayBuffer());
+      throwIfAborted();
       files[`papers/${paper.id}.text.json`] = strToU8(JSON.stringify({ sha256: file.sha256, textByPage: file.textByPage || {} }));
     }
     files[`annotations/${paper.id}.json`] = strToU8(JSON.stringify(await listAnnotations(paper.id)));
+    throwIfAborted();
     files[`translations/${paper.id}.json`] = strToU8(JSON.stringify(await listTranslations(paper.id)));
+    throwIfAborted();
     total = Object.values(files).reduce((sum, value) => sum + value.byteLength, 0);
     if (total > MAX_BACKUP_BYTES) throw new Error("一括ZIPエクスポートの上限は合計1GBです。論文単位に分割してください。");
   }
@@ -50,6 +61,9 @@ export async function exportBackupZip(options?: { signal?: AbortSignal; onProgre
     const finish = () => { if (!settled) { settled = true; worker.terminate(); options?.signal?.removeEventListener("abort", cancel); } };
     const cancel = () => { if (settled) return; worker.postMessage({ type: "cancel" }); finish(); reject(new DOMException("バックアップ生成をキャンセルしました", "AbortError")); };
     options?.signal?.addEventListener("abort", cancel, { once: true });
+    // Abort may have happened between the last preparation check and the
+    // listener registration. EventTarget does not replay an earlier abort.
+    if (options?.signal?.aborted) { cancel(); return; }
     worker.onmessage = (event: MessageEvent<{ type: string; archive?: Uint8Array; message?: string; completed?: number; total?: number }>) => {
       if (event.data.type === "progress") { options?.onProgress?.(event.data.completed || 0, event.data.total || 0); return; }
       finish();
@@ -122,6 +136,6 @@ export async function importBackupZip(file: File) {
     }
     bundles.push({ paper, file: paperFile, annotations, translations });
   }
-  await savePaperBundles(bundles);
+	await savePaperBundles(bundles, { replaceRelated: true });
   return paperEntries.length;
 }

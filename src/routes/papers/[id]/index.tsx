@@ -47,6 +47,7 @@ import {
   saveTranslation,
 } from "~/lib/storage";
 import { localize, useLocale } from "~/lib/i18n";
+import { buildSourceTranslationSegments } from "~/lib/translation-segments";
 
 const defaultProvider: ProviderSettings = {
   mode: "local",
@@ -66,7 +67,8 @@ async function hashText(text: string) {
 }
 
 const normalizeSourceText = (text: string) => text.replace(/\s+/g, " ").trim();
-const pageLabel = (page: number, locale: "ja" | "en") => locale === "en" ? `Page ${page}` : `${page}ページ`;
+const pageLabel = (page: number, locale: "ja" | "en") =>
+  locale === "en" ? `Page ${page}` : `${page}ページ`;
 const safeDownloadName = (name: string, fallback: string) => {
   const normalized = Array.from(
     name.trim().replace(/[\\/:*?"<>|]/g, "_"),
@@ -75,21 +77,45 @@ const safeDownloadName = (name: string, fallback: string) => {
   return normalized || fallback;
 };
 const InlineMarkdown = component$<{ text: string }>(({ text }) => {
-  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\(https?:\/\/[^)]+\))/g);
-  return <>{parts.map((part, index) => {
-    const bold = part.match(/^\*\*(.+)\*\*$/);
-    const code = part.match(/^`(.+)`$/);
-    const link = part.match(/^\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/);
-    if (bold) return <strong key={index}>{bold[1]}</strong>;
-    if (code) return <code key={index} class="rounded bg-slate-100 px-1">{code[1]}</code>;
-    if (link) return <a key={index} href={link[2]} target="_blank" rel="noreferrer" class="text-sky-700 underline">{link[1]}</a>;
-    return <span key={index}>{part}</span>;
-  })}</>;
+  const parts = text.split(
+    /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\(https?:\/\/[^)]+\))/g,
+  );
+  return (
+    <>
+      {parts.map((part, index) => {
+        const bold = part.match(/^\*\*(.+)\*\*$/);
+        const code = part.match(/^`(.+)`$/);
+        const link = part.match(/^\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/);
+        if (bold) return <strong key={index}>{bold[1]}</strong>;
+        if (code)
+          return (
+            <code key={index} class="rounded bg-slate-100 px-1">
+              {code[1]}
+            </code>
+          );
+        if (link)
+          return (
+            <a
+              key={index}
+              href={link[2]}
+              target="_blank"
+              rel="noreferrer"
+              class="text-sky-700 underline"
+            >
+              {link[1]}
+            </a>
+          );
+        return <span key={index}>{part}</span>;
+      })}
+    </>
+  );
 });
-const MarkdownPreview = component$<{ value: string }>(({ value }) => (
-  <div class="space-y-3 text-sm leading-7 text-slate-700">
-    {value.trim() ? (
-      value.split("\n").map((line, index) =>
+const MarkdownPreview = component$<{ value: string }>(({ value }) => {
+  const locale = useLocale();
+  return (
+    <div class="space-y-3 text-sm leading-7 text-slate-700">
+      {value.trim() ? (
+        value.split("\n").map((line, index) =>
           line.startsWith("# ") ? (
             <h3 key={index} class="text-lg font-bold text-slate-950">
               <InlineMarkdown text={line.slice(2)} />
@@ -99,21 +125,44 @@ const MarkdownPreview = component$<{ value: string }>(({ value }) => (
               <InlineMarkdown text={line.slice(3)} />
             </h4>
           ) : line.startsWith("- ") ? (
-            <p key={index}>・<InlineMarkdown text={line.slice(2)} /></p>
+            <p key={index}>
+              ・<InlineMarkdown text={line.slice(2)} />
+            </p>
           ) : (
-            <p key={index}><InlineMarkdown text={line || " "} /></p>
-        ),
-      )
-    ) : (
-      <p class="text-slate-400">翻訳文はまだありません。</p>
-    )}
-  </div>
-));
+            <p key={index}>
+              <InlineMarkdown text={line || " "} />
+            </p>
+          ),
+        )
+      ) : (
+        <p class="text-slate-400">
+          {localize(
+            locale.value,
+            "翻訳文はまだありません。",
+            "No translation yet.",
+          )}
+        </p>
+      )}
+    </div>
+  );
+});
 
 export default component$(() => {
   const locale = useLocale();
   const t = (japanese: string, english: string) =>
     localize(locale.value, japanese, english);
+  const displayedSaveState = () => {
+    if (locale.value !== "en") return saveState.value;
+    const messages: Record<string, string> = {
+      "未保存の変更": "Unsaved changes",
+      "保存中…": "Saving…",
+      "保存済み": "Saved",
+      "翻訳中…": "Translating…",
+      "翻訳をキャンセルしました": "Translation canceled.",
+      "保存できませんでした": "Could not save.",
+    };
+    return messages[saveState.value] || saveState.value;
+  };
   const location = useLocation();
   const id = location.params.id;
   const paper = useSignal<PaperDocument>();
@@ -131,6 +180,7 @@ export default component$(() => {
   const translationProgress = useSignal("");
   const translationStale = useSignal(false);
   const selectedTranslationId = useSignal("");
+  const translationDraftIsNew = useSignal(false);
   const dirty = useSignal(0);
   const saved = useSignal(0);
   const saveState = useSignal("保存済み");
@@ -146,6 +196,9 @@ export default component$(() => {
   const totalPages = useSignal(0);
   const fitMode = useSignal<PdfFitMode>();
   const fitVersion = useSignal(0);
+  const fitting = useSignal(false);
+  const initialFitPending = useSignal(false);
+  const manualZoom = useSignal(false);
   const providerConnected = useSignal(false);
   const requestedPage = (() => {
     const raw = location.url.searchParams.get("page");
@@ -155,7 +208,9 @@ export default component$(() => {
   })();
   const requestedReturnTo = (() => {
     const value = location.url.searchParams.get("returnTo");
-    return value && value.startsWith("/") && !value.startsWith("//") ? value : "/";
+    return value && value.startsWith("/") && !value.startsWith("//")
+      ? value
+      : "/";
   })();
 
   useOnDocument(
@@ -171,14 +226,18 @@ export default component$(() => {
     if (window.matchMedia("(max-width: 639px)").matches)
       showThumbnails.value = false;
     try {
-      const [loaded, loadedFile, configuredProvider, defaultViewMode] = await Promise.all([
-        getPaper(id),
-        getPaperFile(id),
-        getSetting("provider", defaultProvider),
-        getSetting<"continuous" | "single">("viewMode", "continuous"),
-      ]);
+      const [loaded, loadedFile, configuredProvider, defaultViewMode] =
+        await Promise.all([
+          getPaper(id),
+          getPaperFile(id),
+          getSetting("provider", defaultProvider),
+          getSetting<"continuous" | "single">("viewMode", "continuous"),
+        ]);
       if (!loaded) throw new Error("論文が見つかりません。");
-      if (!loadedFile) throw new Error("この論文にはPDF本体がありません。元のPDFを再登録して結び直してください。");
+      if (!loadedFile)
+        throw new Error(
+          "この論文にはPDF本体がありません。元のPDFを再登録して結び直してください。",
+        );
       const initialLanguage =
         getSessionProvider()?.targetLanguage ||
         configuredProvider.targetLanguage;
@@ -204,23 +263,65 @@ export default component$(() => {
           ),
       );
       zoom.value = loaded.reader?.zoom || 1;
-      viewMode.value = loaded.reader?.viewMode || defaultViewMode || "continuous";
+      const mobileViewport = window.matchMedia("(max-width: 639px)").matches;
+      const storedFitMode = loaded.reader?.fitMode;
+      manualZoom.value =
+        storedFitMode === "manual" || (!storedFitMode && !mobileViewport);
+      fitMode.value =
+        storedFitMode && storedFitMode !== "manual" ? storedFitMode : undefined;
+      viewMode.value =
+        loaded.reader?.viewMode || defaultViewMode || "continuous";
       layout.value = loaded.reader?.layout || "split";
+      if (fitMode.value || (!storedFitMode && mobileViewport)) {
+        if (!fitMode.value) fitMode.value = "width";
+        fitting.value = true;
+        initialFitPending.value = true;
+      }
       void savePaper(opened).catch(() => undefined);
-      translations.value = (await listTranslations(id)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+      translations.value = (await listTranslations(id)).sort((a, b) =>
+        b.updatedAt.localeCompare(a.updatedAt),
+      );
       annotations.value = await listAnnotations(id);
       const latest = translations.value[0];
       selectedTranslationId.value = latest?.id || "";
-      const draft = await getSetting<{ markdown: string; updatedAt: string; translationId?: string; language?: string; segments?: TranslationSegmentResult[] } | undefined>(`editor-draft:${id}`, undefined).catch(() => undefined);
-      if (draft?.translationId && translations.value.some((item) => item.id === draft.translationId)) selectedTranslationId.value = draft.translationId;
-      const initialTranslation = translations.value.find((item) => item.id === selectedTranslationId.value) || latest;
+      const draft = await getSetting<
+        | {
+            markdown: string;
+            updatedAt: string;
+            translationId?: string;
+            language?: string;
+            segments?: TranslationSegmentResult[];
+          }
+        | undefined
+      >(`editor-draft:${id}`, undefined).catch(() => undefined);
+      if (
+        draft?.translationId &&
+        translations.value.some((item) => item.id === draft.translationId)
+      )
+        selectedTranslationId.value = draft.translationId;
+      translationDraftIsNew.value = Boolean(
+        draft?.markdown != null &&
+          (!draft.translationId ||
+            !translations.value.some(
+              (item) => item.id === draft.translationId,
+            )),
+      );
+      const initialTranslation =
+        translations.value.find(
+          (item) => item.id === selectedTranslationId.value,
+        ) || latest;
       markdown.value = draft?.markdown ?? initialTranslation?.markdown ?? "";
-      if (draft?.language && isSupportedLanguage(draft.language)) language.value = draft.language;
-      if (draft?.markdown != null && draft.markdown !== initialTranslation?.markdown) {
+      if (draft?.language && isSupportedLanguage(draft.language))
+        language.value = draft.language;
+      if (
+        draft?.markdown != null &&
+        draft.markdown !== initialTranslation?.markdown
+      ) {
         dirty.value = 1;
         saveState.value = "未保存の変更";
       }
-      translationSegments.value = draft?.segments || initialTranslation?.segments || [];
+      translationSegments.value =
+        draft?.segments || initialTranslation?.segments || [];
       if (translationSegments.value.length) {
         const comparisons = await Promise.all(
           translationSegments.value.map(async (segment) => {
@@ -249,6 +350,18 @@ export default component$(() => {
       loading.value = false;
     }
   });
+  // The reader learns the page count asynchronously. Defer the initial fit
+  // request until both the PDF and its pages are ready so it cannot be
+  // consumed before PdfReader has a live PDF.js document.
+  // eslint-disable-next-line qwik/no-use-visible-task
+  useVisibleTask$(({ track }) => {
+    track(() => file.value);
+    track(() => totalPages.value);
+    track(() => initialFitPending.value);
+    if (!initialFitPending.value || !file.value || !totalPages.value) return;
+    initialFitPending.value = false;
+    fitVersion.value++;
+  });
   const save = $(async () => {
     const current = paper.value;
     if (!current || !file.value) return;
@@ -269,8 +382,14 @@ export default component$(() => {
       };
       paper.value = updated;
       await savePaper(updated);
-      const previous = translations.value.find((item) => item.id === snapshotTranslationId) || translations.value[0];
-      let persistedTranslationId = snapshotTranslationId || previous?.id || "";
+      const previous = translationDraftIsNew.value
+        ? undefined
+        : translations.value.find(
+            (item) => item.id === snapshotTranslationId,
+          ) || translations.value[0];
+      let persistedTranslationId = translationDraftIsNew.value
+        ? ""
+        : snapshotTranslationId || previous?.id || "";
       if (snapshotMarkdown !== (previous?.markdown || "")) {
         const translation: Translation = {
           id: previous?.id || crypto.randomUUID(),
@@ -282,9 +401,11 @@ export default component$(() => {
           revision: (previous?.revision || 0) + 1,
           // Keep page/source mapping when editing an existing translation so
           // history selection and stale-source warnings remain meaningful.
-          segments: snapshotSegments.length ? snapshotSegments : previous?.segments,
-          pageStart: previous?.pageStart,
-          pageEnd: previous?.pageEnd,
+          segments: snapshotSegments.length
+            ? snapshotSegments
+            : previous?.segments,
+          pageStart: previous?.pageStart || snapshotSegments[0]?.pageNumber,
+          pageEnd: previous?.pageEnd || snapshotSegments.at(-1)?.pageNumber,
         };
         persistedTranslationId = translation.id;
         await saveTranslation(translation);
@@ -293,8 +414,12 @@ export default component$(() => {
           ...translations.value.filter((item) => item.id !== translation.id),
         ];
         selectedTranslationId.value = translation.id;
+        translationDraftIsNew.value = false;
       }
-      const stillCurrent = dirty.value === version && selectedTranslationId.value === persistedTranslationId && markdown.value === snapshotMarkdown;
+      const stillCurrent =
+        dirty.value === version &&
+        selectedTranslationId.value === persistedTranslationId &&
+        markdown.value === snapshotMarkdown;
       if (stillCurrent) {
         await removeSetting(`editor-draft:${id}`).catch(() => undefined);
         saved.value = version;
@@ -309,10 +434,23 @@ export default component$(() => {
     }
   });
   const selectTranslation = $(async (translationId: string) => {
-    if (dirty.value !== saved.value && !window.confirm(localize(locale.value, "未保存の変更を破棄して別の翻訳を開きますか？", "Discard unsaved changes and open another translation?"))) return;
-    const selected = translations.value.find((item) => item.id === translationId);
+    if (
+      dirty.value !== saved.value &&
+      !window.confirm(
+        localize(
+          locale.value,
+          "未保存の変更を破棄して別の翻訳を開きますか？",
+          "Discard unsaved changes and open another translation?",
+        ),
+      )
+    )
+      return;
+    const selected = translations.value.find(
+      (item) => item.id === translationId,
+    );
     if (!selected) return;
     selectedTranslationId.value = selected.id;
+    translationDraftIsNew.value = false;
     markdown.value = selected.markdown;
     language.value = selected.language;
     translationSegments.value = selected.segments || [];
@@ -331,6 +469,7 @@ export default component$(() => {
       nextZoom: number,
       nextViewMode: "continuous" | "single",
       nextLayout?: "split" | "stack" | "pdf" | "text",
+      nextFitMode?: PdfFitMode,
     ) => {
       const current = paper.value;
       if (!current) return;
@@ -340,6 +479,9 @@ export default component$(() => {
         reader: {
           page: nextPage,
           zoom: nextZoom,
+          fitMode: manualZoom.value
+            ? ("manual" as const)
+            : (nextFitMode ?? fitMode.value),
           viewMode: nextViewMode,
           layout: nextLayout ?? layout.value,
         },
@@ -372,12 +514,19 @@ export default component$(() => {
     }
     void persistReaderSoon();
   });
-  const updateZoom = $((value: number) => {
+  const updateZoom = $((value: number, fromFit = false) => {
     zoom.value = value;
+    if (!fitting.value && !fromFit) {
+      fitMode.value = undefined;
+      manualZoom.value = true;
+    }
+    fitting.value = false;
     void persistReader(page.value, value, viewMode.value);
   });
   const requestFit = $((mode: PdfFitMode) => {
     fitMode.value = mode;
+    manualZoom.value = false;
+    fitting.value = true;
     fitVersion.value++;
   });
   const updateViewMode = $((value: "continuous" | "single") => {
@@ -442,25 +591,63 @@ export default component$(() => {
     saveState.value = `${draft.pageNumber}ページの${draft.type === "highlight" ? "ハイライト" : draft.type === "underline" ? "下線" : "コメント"}を保存しました`;
   });
   const deleteAnnotation = $(async (annotation: Annotation) => {
-    if (!window.confirm(localize(locale.value, "この注釈を削除しますか？", "Delete this annotation?"))) return;
+    if (
+      !window.confirm(
+        localize(
+          locale.value,
+          "この注釈を削除しますか？",
+          "Delete this annotation?",
+        ),
+      )
+    )
+      return;
     try {
       await removeAnnotation(annotation.id);
-      annotations.value = annotations.value.filter((item) => item.id !== annotation.id);
+      annotations.value = annotations.value.filter(
+        (item) => item.id !== annotation.id,
+      );
     } catch (error) {
-      saveState.value = error instanceof Error ? error.message : localize(locale.value, "注釈を削除できませんでした", "Could not delete annotation");
+      saveState.value =
+        error instanceof Error
+          ? error.message
+          : localize(
+              locale.value,
+              "注釈を削除できませんでした",
+              "Could not delete annotation",
+            );
     }
   });
   const editAnnotation = $(async (annotation: Annotation) => {
     if (annotation.type !== "comment") return;
-    const content = window.prompt(localize(locale.value, "コメントを編集", "Edit comment"), annotation.content || "");
+    const content = window.prompt(
+      localize(locale.value, "コメントを編集", "Edit comment"),
+      annotation.content || "",
+    );
     if (content == null || !content.trim()) return;
-    const updated = { ...annotation, content: content.trim(), updatedAt: new Date().toISOString() };
+    const updated = {
+      ...annotation,
+      content: content.trim(),
+      updatedAt: new Date().toISOString(),
+    };
     try {
       await saveAnnotation(updated);
-      annotations.value = annotations.value.map((item) => item.id === updated.id ? updated : item);
-      saveState.value = localize(locale.value, "コメントを更新しました", "Comment updated");
+      annotations.value = annotations.value.map((item) =>
+        item.id === updated.id ? updated : item,
+      );
+      saveState.value = localize(
+        locale.value,
+        "コメントを更新しました",
+        "Comment updated",
+      );
     } catch (error) {
-      saveState.value = error instanceof Error ? error.message : localize(locale.value, "コメントを更新できませんでした", "Could not update comment");
+      saveState.value =
+        error instanceof Error
+          ? error.message
+          : localize(
+              locale.value,
+              "コメントを更新できませんでした",
+              "Could not update comment",
+            );
     }
   });
   const translateFromReader = $(async (draft: TranslationDraft) => {
@@ -471,7 +658,11 @@ export default component$(() => {
     if (dirty.value !== saved.value) {
       await save();
       if (dirty.value !== saved.value) {
-        saveState.value = localize(locale.value, "未保存の変更を保存できないため翻訳を開始できません。", "Translation was not started because the pending edit could not be saved.");
+        saveState.value = localize(
+          locale.value,
+          "未保存の変更を保存できないため翻訳を開始できません。",
+          "Translation was not started because the pending edit could not be saved.",
+        );
         return;
       }
     }
@@ -499,21 +690,45 @@ export default component$(() => {
     translationProgress.value = "";
     const controller = new AbortController();
     readerTranslationController.value = noSerialize(controller);
+    const streamedSegments: TranslationSegmentResult[] = [];
     try {
-      if (draft.quote.length > 20_000)
-        throw new Error(localize(locale.value, "選択範囲が上限の20,000文字を超えています。範囲を分けて翻訳してください。", "The selected text exceeds the 20,000-character limit. Select a smaller range."));
+      const isPageRange = Boolean(
+        draft.endPage && draft.endPage > draft.pageNumber,
+      );
+      if (!isPageRange && draft.quote.length > 20_000)
+        throw new Error(
+          localize(
+            locale.value,
+            "選択範囲が上限の20,000文字を超えています。範囲を分けて翻訳してください。",
+            "The selected text exceeds the 20,000-character limit. Select a smaller range.",
+          ),
+        );
       const text = draft.quote;
-      const textHash = await hashText(text);
-      const segment = {
-        id: `${id}:${draft.pageNumber}:inline:${Date.now()}`,
-        pageNumber: draft.pageNumber,
-        order: 0,
-        text,
-        textHash,
-      };
+      const sourceSegments = await buildSourceTranslationSegments({
+        documentId: id,
+        startPage: draft.pageNumber,
+        endPage: isPageRange ? draft.endPage : undefined,
+        fallbackText: text,
+        textByPage: file.value?.textByPage,
+        requestKey: crypto.randomUUID(),
+      });
+      const sourceBytes = sourceSegments.reduce(
+        (sum, item) => sum + new TextEncoder().encode(item.text).byteLength,
+        0,
+      );
+      if (sourceBytes > 500_000)
+        throw new Error(
+          localize(
+            locale.value,
+            "翻訳する範囲が大きすぎます。500,000バイト以内に分けてください。",
+            "This translation range is too large. Split it into 500,000 bytes or less.",
+          ),
+        );
+      const sourceTextById = new Map(
+        sourceSegments.map((item) => [item.id, item.text]),
+      );
       let translated = "";
       let segments: TranslationSegmentResult[] | undefined;
-      const streamedSegments: TranslationSegmentResult[] = [];
       if (!settings.connected)
         throw new Error(
           localize(
@@ -528,13 +743,17 @@ export default component$(() => {
           sourceLanguage: "auto",
           targetLanguage,
           model: settings.model,
-          segments: [segment],
+          segments: sourceSegments,
           preserveFormatting: true,
         };
         const preview = await estimateTranslation(request);
         if (
           !window.confirm(
-            `${preview.estimate.estimatedCredits}クレジットを使用して${draft.pageNumber}ページを翻訳します。送信先はPaperLens LLMです。続けますか？`,
+            `${preview.estimate.estimatedCredits}クレジットを使用して${
+              isPageRange
+                ? `${draft.pageNumber}〜${draft.endPage}ページ`
+                : `${draft.pageNumber}ページ`
+            }を翻訳します。送信先はPaperLens LLMです。続けますか？`,
           )
         ) {
           saveState.value = "翻訳をキャンセルしました";
@@ -547,27 +766,37 @@ export default component$(() => {
             if (event.type === "started")
               readerTranslationID.value = event.data.translationId;
             if (event.type === "segment") {
-              const segment = { ...event.data, sourceText: text };
+              const segment = {
+                ...event.data,
+                sourceText: sourceTextById.get(event.data.id),
+              };
               streamedSegments.push(segment);
               // Keep in-flight output separate from the editor's selected
               // revision. Autosave must never overwrite a saved translation
               // with a mixture of old and partial streamed content.
-              translationProgress.value = streamedSegments.map((item) => item.translatedText).join("\n\n");
+              translationProgress.value = streamedSegments
+                .map((item) => item.translatedText)
+                .join("\n\n");
             }
           },
           controller.signal,
         );
-        translated = result?.segments.map((item) => item.translatedText).join("\n\n") || translationProgress.value;
+        translated =
+          result?.segments.map((item) => item.translatedText).join("\n\n") ||
+          translationProgress.value;
         segments = (result?.segments || streamedSegments).map((item) => ({
           ...item,
-          sourceText: text,
+          sourceText: sourceTextById.get(item.id),
         }));
       } else {
         const destination = providerDisplayName(settings.mode);
-        const endpoint = settings.mode === "local" || settings.mode === "openai-compatible" ? settings.baseUrl : "";
+        const endpoint =
+          settings.mode === "local" || settings.mode === "openai-compatible"
+            ? settings.baseUrl
+            : "";
         if (
           !window.confirm(
-            `${localize(locale.value, "送信先", "Destination")}: ${destination}${endpoint ? `\n${localize(locale.value, "接続先", "Endpoint")}: ${endpoint}` : ""}\n${localize(locale.value, "対象", "Scope")}: ${localize(locale.value, "選択範囲", "Selected text")}（${draft.pageNumber}${localize(locale.value, "ページ", " page")}）\n${localize(locale.value, "PaperLensクレジット", "PaperLens credits")}: 0\n${localize(locale.value, "APIキーはこのブラウザのセッション中だけ使用します。送信しますか？", "The API key is used only for this browser session. Send the selected text?")}`,
+            `${localize(locale.value, "送信先", "Destination")}: ${destination}${endpoint ? `\n${localize(locale.value, "接続先", "Endpoint")}: ${endpoint}` : ""}\n${localize(locale.value, "対象", "Scope")}: ${isPageRange ? `${draft.pageNumber}〜${draft.endPage}${localize(locale.value, "ページ", " pages")}` : `${localize(locale.value, "選択範囲", "Selected text")}（${draft.pageNumber}${localize(locale.value, "ページ", " page")}）`}\n${localize(locale.value, "PaperLensクレジット", "PaperLens credits")}: 0\n${localize(locale.value, "APIキーはこのブラウザのセッション中だけ使用します。送信しますか？", "The API key is used only for this browser session. Send the selected text?")}`,
           )
         ) {
           saveState.value = localize(
@@ -577,20 +806,30 @@ export default component$(() => {
           );
           return;
         }
-        translated = await translateText(
-          translationSettings,
-          text,
-          controller.signal,
-        );
-        segments = [
-          {
-            id: segment.id,
-            pageNumber: segment.pageNumber,
-            translatedText: translated,
-            sourceTextHash: textHash,
-            sourceText: text,
-          },
-        ];
+        const translatedSegments: TranslationSegmentResult[] = [];
+        for (const sourceSegment of sourceSegments) {
+          const translatedChunk = await translateText(
+            translationSettings,
+            sourceSegment.text,
+            controller.signal,
+          );
+          const translatedSegment: TranslationSegmentResult = {
+            id: sourceSegment.id,
+            pageNumber: sourceSegment.pageNumber,
+            translatedText: translatedChunk,
+            sourceTextHash: sourceSegment.textHash,
+            sourceText: sourceSegment.text,
+          };
+          translatedSegments.push(translatedSegment);
+          streamedSegments.push(translatedSegment);
+          translationProgress.value = translatedSegments
+            .map((item) => item.translatedText)
+            .join("\n\n");
+        }
+        translated = translatedSegments
+          .map((item) => item.translatedText)
+          .join("\n\n");
+        segments = translatedSegments;
       }
       if (!translated.trim()) throw new Error("翻訳結果が空です。");
       const item: Translation = {
@@ -617,12 +856,50 @@ export default component$(() => {
       saved.value = 0;
       saveState.value = `${draft.pageNumber}ページの翻訳を保存しました`;
     } catch (error) {
-      saveState.value =
-        error instanceof DOMException && error.name === "AbortError"
-          ? "翻訳をキャンセルしました。受信済みの結果を確認できます。"
-          : error instanceof Error
-            ? error.message
-            : "翻訳に失敗しました";
+      if (error instanceof DOMException && error.name === "AbortError") {
+        const partial = streamedSegments
+          .map((item) => item.translatedText)
+          .join("\n\n")
+          .trim();
+        if (partial) {
+          markdown.value = partial;
+          translationSegments.value = streamedSegments;
+          translationDraftIsNew.value = true;
+          dirty.value++;
+          let draftSaved = true;
+          try {
+            await saveSetting(`editor-draft:${id}`, {
+              markdown: partial,
+              translationId: translationDraftIsNew.value
+                ? undefined
+                : readerTranslationID.value || undefined,
+              language: targetLanguage,
+              segments: streamedSegments,
+              updatedAt: new Date().toISOString(),
+            });
+          } catch {
+            draftSaved = false;
+          }
+          saveState.value = localize(
+            locale.value,
+            draftSaved
+              ? "翻訳をキャンセルしました。受信済みの結果を下書きに保存しました。"
+              : "翻訳をキャンセルしました。下書きを保存できませんでした。内容をコピーして保存してください。",
+            draftSaved
+              ? "Translation canceled. Received text was saved as a draft."
+              : "Translation canceled, but the draft could not be saved. Copy the text somewhere safe.",
+          );
+        } else {
+          saveState.value = localize(
+            locale.value,
+            "翻訳をキャンセルしました。",
+            "Translation canceled.",
+          );
+        }
+      } else {
+        saveState.value =
+          error instanceof Error ? error.message : "翻訳に失敗しました";
+      }
     } finally {
       readerTranslationController.value = undefined;
       readerTranslationID.value = "";
@@ -630,14 +907,20 @@ export default component$(() => {
   });
   const cancelReaderTranslation = $(async () => {
     const id = readerTranslationID.value;
+    // Stop rendering/provider consumption immediately. The control request
+    // is best-effort and must not hold the local AbortController hostage.
+    readerTranslationController.value?.abort();
     if (id) {
+      const cancelController = new AbortController();
+      const timeout = window.setTimeout(() => cancelController.abort(), 3_000);
       try {
-        await cancelManagedTranslation(id);
-      } catch {
-        /* the request context still releases the reservation */
+        await cancelManagedTranslation(id, cancelController.signal).catch(
+          () => undefined,
+        );
+      } finally {
+        window.clearTimeout(timeout);
       }
     }
-    readerTranslationController.value?.abort();
   });
   const exportMarkdown = $(() => {
     if (!markdown.value.trim()) return;
@@ -681,15 +964,42 @@ export default component$(() => {
   });
   const translateRange = $(async () => {
     if (!file.value?.textByPage || !totalPages.value) return;
-    const raw = window.prompt(localize(locale.value, "翻訳するページ範囲（例: 2-4）", "Pages to translate (for example: 2-4)"), `${page.value}-${page.value}`);
+    const raw = window.prompt(
+      localize(
+        locale.value,
+        "翻訳するページ範囲（例: 2-4）",
+        "Pages to translate (for example: 2-4)",
+      ),
+      `${page.value}-${page.value}`,
+    );
     if (!raw) return;
     const match = raw.trim().match(/^(\d+)\s*-\s*(\d+)$/);
-    if (!match) { saveState.value = localize(locale.value, "ページ範囲の形式を確認してください", "Enter a range such as 2-4"); return; }
+    if (!match) {
+      saveState.value = localize(
+        locale.value,
+        "ページ範囲の形式を確認してください",
+        "Enter a range such as 2-4",
+      );
+      return;
+    }
     const start = Math.max(1, Number(match[1]));
     const end = Math.min(totalPages.value, Number(match[2]));
-    if (start > end) { saveState.value = localize(locale.value, "ページ範囲の形式を確認してください", "Enter a valid page range"); return; }
-    const quote = Array.from({ length: end - start + 1 }, (_, index) => file.value?.textByPage?.[start + index] || "").filter(Boolean).join("\n\n");
-    if (quote) await translateFromReader({ pageNumber: start, endPage: end, quote });
+    if (start > end) {
+      saveState.value = localize(
+        locale.value,
+        "ページ範囲の形式を確認してください",
+        "Enter a valid page range",
+      );
+      return;
+    }
+    const quote = Array.from(
+      { length: end - start + 1 },
+      (_, index) => file.value?.textByPage?.[start + index] || "",
+    )
+      .filter(Boolean)
+      .join("\n\n");
+    if (quote)
+      await translateFromReader({ pageNumber: start, endPage: end, quote });
   });
 
   if (loading.value)
@@ -706,7 +1016,10 @@ export default component$(() => {
             {error.value || t("論文が見つかりません", "Paper not found")}
           </p>
           {error.value.includes("PDF本体") && (
-            <Link href={`/upload/?replace=${encodeURIComponent(id)}`} class="button primary mt-3">
+            <Link
+              href={`/upload/?replace=${encodeURIComponent(id)}`}
+              class="button primary mt-3"
+            >
               {t("元のPDFを再登録", "Reattach the original PDF")}
             </Link>
           )}
@@ -872,7 +1185,7 @@ export default component$(() => {
           >
             <option value="continuous">{t("連続", "Continuous")}</option>
             <option value="single">{t("単ページ", "Single page")}</option>
-            </select>
+          </select>
           <button
             type="button"
             class="viewer-icon-button sm:hidden"
@@ -926,8 +1239,16 @@ export default component$(() => {
         </div>
       </header>
       {saveState.value !== "保存済み" && (
-        <div role={saveState.value.includes("失敗") || saveState.value.includes("できません") ? "alert" : "status"} class="shrink-0 border-b border-sky-200 bg-sky-50 px-4 py-2 text-xs text-sky-900">
-          {saveState.value}
+        <div
+          role={
+            saveState.value.includes("失敗") ||
+            saveState.value.includes("できません")
+              ? "alert"
+              : "status"
+          }
+          class="shrink-0 border-b border-sky-200 bg-sky-50 px-4 py-2 text-xs text-sky-900"
+        >
+          {displayedSaveState()}
         </div>
       )}
 
@@ -953,6 +1274,7 @@ export default component$(() => {
             })}
             onPage$={updatePage}
             onZoom$={updateZoom}
+            onFit$={requestFit}
             onAnnotate$={addAnnotation}
             onTranslate$={translateFromReader}
           />
@@ -985,7 +1307,7 @@ export default component$(() => {
               class="max-w-32 truncate text-[10px] text-slate-500 sm:max-w-48 sm:text-[11px]"
               role="status"
             >
-              {saveState.value}
+              {displayedSaveState()}
             </span>
             {saveState.value === "翻訳中…" && (
               <button
@@ -996,10 +1318,10 @@ export default component$(() => {
                 {t("キャンセル", "Cancel")}
               </button>
             )}
-              <button
-                type="button"
-                class="viewer-panel-button px-2 md:px-2.5"
-                disabled={
+            <button
+              type="button"
+              class="viewer-panel-button px-2 md:px-2.5"
+              disabled={
                 saving.value ||
                 saveState.value === "翻訳中…" ||
                 !providerConnected.value ||
@@ -1014,7 +1336,16 @@ export default component$(() => {
                 {t("このページを翻訳", "Translate page")}
               </span>
             </button>
-            <button type="button" class="viewer-panel-button hidden sm:inline-flex" disabled={saveState.value === "翻訳中…" || !providerConnected.value || !totalPages.value} onClick$={translateRange}>
+            <button
+              type="button"
+              class="viewer-panel-button hidden sm:inline-flex"
+              disabled={
+                saveState.value === "翻訳中…" ||
+                !providerConnected.value ||
+                !totalPages.value
+              }
+              onClick$={translateRange}
+            >
               <Icon name="ArrowUpDown" size={15} />
               {t("範囲を翻訳", "Translate range")}
             </button>
@@ -1024,7 +1355,10 @@ export default component$(() => {
               aria-label={
                 providerConnected.value
                   ? t("LLM接続済み。設定を開く", "LLM connected. Open settings")
-                  : t("LLM未接続。設定を開く", "LLM not connected. Open settings")
+                  : t(
+                      "LLM未接続。設定を開く",
+                      "LLM not connected. Open settings",
+                    )
               }
               title={
                 providerConnected.value
@@ -1095,14 +1429,50 @@ export default component$(() => {
               )}
             </p>
           )}
-          {translationProgress.value && (saveState.value === "翻訳中…" || saveState.value.includes("キャンセル")) && (
-            <div class="border-b border-sky-200 bg-sky-50 px-4 py-2 text-xs text-sky-900" role="status" aria-live="polite">
-              {t("受信済みの翻訳", "Received translation")} · {translationProgress.value.slice(0, 240)}{translationProgress.value.length > 240 ? "…" : ""}
-            </div>
-          )}
+          {translationProgress.value &&
+            (saveState.value === "翻訳中…" ||
+              saveState.value.includes("キャンセル")) && (
+              <div
+                class="border-b border-sky-200 bg-sky-50 px-4 py-2 text-xs text-sky-900"
+                role="status"
+                aria-live="polite"
+              >
+                {t("受信済みの翻訳", "Received translation")} ·{" "}
+                {translationProgress.value.slice(0, 240)}
+                {translationProgress.value.length > 240 ? "…" : ""}
+              </div>
+            )}
           {markdown.value && (
-            <p class="m-0 border-b border-slate-100 bg-slate-50 px-4 py-1.5 text-[11px] text-slate-500" role="status">
-              {t("表示中の翻訳", "Showing translation")} · {(() => { const selected = translations.value.find((item) => item.id === selectedTranslationId.value); return selected?.language || t("未選択", "None"); })()} · {(() => { const selected = translations.value.find((item) => item.id === selectedTranslationId.value); return selected?.pageStart ? selected.pageEnd && selected.pageEnd !== selected.pageStart ? `${pageLabel(selected.pageStart, locale.value)}–${pageLabel(selected.pageEnd, locale.value)}` : pageLabel(selected.pageStart, locale.value) : translationSegments.value.length ? [...new Set(translationSegments.value.map((segment) => pageLabel(segment.pageNumber, locale.value)))].join(", ") : t("ページ情報なし", "Page unspecified"); })()}
+            <p
+              class="m-0 border-b border-slate-100 bg-slate-50 px-4 py-1.5 text-[11px] text-slate-500"
+              role="status"
+            >
+              {t("表示中の翻訳", "Showing translation")} ·{" "}
+              {(() => {
+                const selected = translations.value.find(
+                  (item) => item.id === selectedTranslationId.value,
+                );
+                return selected?.language || t("未選択", "None");
+              })()}{" "}
+              ·{" "}
+              {(() => {
+                const selected = translations.value.find(
+                  (item) => item.id === selectedTranslationId.value,
+                );
+                return selected?.pageStart
+                  ? selected.pageEnd && selected.pageEnd !== selected.pageStart
+                    ? `${pageLabel(selected.pageStart, locale.value)}–${pageLabel(selected.pageEnd, locale.value)}`
+                    : pageLabel(selected.pageStart, locale.value)
+                  : translationSegments.value.length
+                    ? [
+                        ...new Set(
+                          translationSegments.value.map((segment) =>
+                            pageLabel(segment.pageNumber, locale.value),
+                          ),
+                        ),
+                      ].join(", ")
+                    : t("ページ情報なし", "Page unspecified");
+              })()}
             </p>
           )}
           <div class="min-h-0 flex-1 overflow-auto p-5 sm:p-8">
@@ -1119,7 +1489,15 @@ export default component$(() => {
                   translationStale.value = false;
                   dirty.value++;
                   saveState.value = "未保存の変更";
-                  void saveSetting(`editor-draft:${id}`, { markdown: el.value, translationId: selectedTranslationId.value, language: language.value, segments: translationSegments.value, updatedAt: new Date().toISOString() }).catch(() => undefined);
+                  void saveSetting(`editor-draft:${id}`, {
+                    markdown: el.value,
+                    translationId: translationDraftIsNew.value
+                      ? undefined
+                      : selectedTranslationId.value,
+                    language: language.value,
+                    segments: translationSegments.value,
+                    updatedAt: new Date().toISOString(),
+                  }).catch(() => undefined);
                 }}
               />
             ) : (
@@ -1129,14 +1507,45 @@ export default component$(() => {
             )}
             {annotations.value.length > 0 && (
               <details class="mx-auto mt-8 max-w-3xl border border-slate-200">
-                <summary class="cursor-pointer px-4 py-3 text-sm font-semibold">{t("注釈", "Annotations")} ({annotations.value.length})</summary>
+                <summary class="cursor-pointer px-4 py-3 text-sm font-semibold">
+                  {t("注釈", "Annotations")} ({annotations.value.length})
+                </summary>
                 <div class="space-y-2 border-t border-slate-200 p-3">
                   {annotations.value.map((annotation) => (
-                    <div key={annotation.id} class="flex items-start gap-3 border-l-2 border-sky-300 bg-slate-50 p-3 text-xs">
-                      <button type="button" class="font-semibold text-sky-700 hover:text-sky-950" onClick$={() => updatePage(annotation.pageNumber)}>{pageLabel(annotation.pageNumber, locale.value)}</button>
-                      <p class="min-w-0 flex-1 whitespace-pre-wrap text-slate-600">{annotation.content || annotation.quote || t("注釈", "Annotation")}</p>
-                      {annotation.type === "comment" && <button type="button" class="text-sky-700" aria-label={t("コメントを編集", "Edit comment")} onClick$={() => editAnnotation(annotation)}><Icon name="Pencil" size={15} /></button>}
-                      <button type="button" class="text-red-700" aria-label={t("注釈を削除", "Delete annotation")} onClick$={() => deleteAnnotation(annotation)}><Icon name="Trash2" size={15} /></button>
+                    <div
+                      key={annotation.id}
+                      class="flex items-start gap-3 border-l-2 border-sky-300 bg-slate-50 p-3 text-xs"
+                    >
+                      <button
+                        type="button"
+                        class="font-semibold text-sky-700 hover:text-sky-950"
+                        onClick$={() => updatePage(annotation.pageNumber)}
+                      >
+                        {pageLabel(annotation.pageNumber, locale.value)}
+                      </button>
+                      <p class="min-w-0 flex-1 whitespace-pre-wrap text-slate-600">
+                        {annotation.content ||
+                          annotation.quote ||
+                          t("注釈", "Annotation")}
+                      </p>
+                      {annotation.type === "comment" && (
+                        <button
+                          type="button"
+                          class="text-sky-700"
+                          aria-label={t("コメントを編集", "Edit comment")}
+                          onClick$={() => editAnnotation(annotation)}
+                        >
+                          <Icon name="Pencil" size={15} />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        class="text-red-700"
+                        aria-label={t("注釈を削除", "Delete annotation")}
+                        onClick$={() => deleteAnnotation(annotation)}
+                      >
+                        <Icon name="Trash2" size={15} />
+                      </button>
                     </div>
                   ))}
                 </div>

@@ -16,7 +16,11 @@ import { localize, useLocale } from "~/lib/i18n";
 export type AnnotationDraft = Pick<Annotation, "type" | "quote" | "rect"> & {
   pageNumber: number;
 };
-export type TranslationDraft = { pageNumber: number; quote: string; endPage?: number };
+export type TranslationDraft = {
+  pageNumber: number;
+  quote: string;
+  endPage?: number;
+};
 export type PdfFitMode = "page" | "width" | "height";
 type Props = {
   documentId: string;
@@ -25,10 +29,11 @@ type Props = {
   viewMode: "continuous" | "single";
   active?: boolean;
   onPage$: QRL<(page: number) => void>;
-  onZoom$?: QRL<(zoom: number) => void>;
+  onZoom$?: QRL<(zoom: number, fromFit?: boolean) => void>;
   onAnnotate$?: QRL<(draft: AnnotationDraft) => void>;
   onTranslate$?: QRL<(draft: TranslationDraft) => void>;
   onPages$?: QRL<(pages: number) => void>;
+  onFit$?: QRL<(mode: PdfFitMode) => void>;
   annotations?: Annotation[];
   minimal?: boolean;
   showThumbnails?: boolean;
@@ -59,6 +64,7 @@ export const PdfReader = component$<Props>(
     onAnnotate$,
     onTranslate$,
     onPages$,
+    onFit$,
     annotations = [],
     minimal = false,
     showThumbnails = false,
@@ -104,6 +110,7 @@ export const PdfReader = component$<Props>(
       useSignal<
         WeakMap<HTMLElement, { cancel: () => void; promise: Promise<void> }>
       >();
+    const fitEpoch = useSignal(0);
 
     const renderPage = $(
       async (pageNumber: number, target: HTMLElement, scale?: number) => {
@@ -115,7 +122,8 @@ export const PdfReader = component$<Props>(
         const renderScale = scale ?? localZoom.value;
         const renderKey = `${pageNumber}:${renderScale}`;
         if (
-          (target.dataset.renderKey === renderKey || target.dataset.renderRequest === renderKey) &&
+          (target.dataset.renderKey === renderKey ||
+            target.dataset.renderRequest === renderKey) &&
           (target.dataset.rendered === "true" || renderTasks.value?.has(target))
         )
           return;
@@ -412,7 +420,12 @@ export const PdfReader = component$<Props>(
           (event.key === "ArrowLeft" || event.key === "ArrowRight")
         )
           return;
-        if (editing || target?.tagName === "SELECT" || target?.tagName === "BUTTON") return;
+        if (
+          editing ||
+          target?.tagName === "SELECT" ||
+          target?.tagName === "BUTTON"
+        )
+          return;
         if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
           event.preventDefault();
           void onPage$(Math.max(1, page - 1));
@@ -480,56 +493,74 @@ export const PdfReader = component$<Props>(
       pageError.value = "";
       void onPage$(value);
     });
-    const zoomTo = $((value: number) => {
+    const zoomTo = $((value: number, fromFit = false) => {
+      // Any explicit zoom change invalidates an in-flight fit calculation.
+      // The fit path checks its epoch before applying an asynchronous result.
+      fitEpoch.value++;
       const next = Math.max(0.5, Math.min(3, value));
       localZoom.value = next;
-      return onZoom$?.(next);
+      return onZoom$?.(next, fromFit);
     });
-    const fit = $((mode: PdfFitMode) => {
-      void pdf.value?.getPage(page).then(
-        (pdfPage: {
-          getViewport: (options: { scale: number }) => {
-            width: number;
-            height: number;
-          };
-        }) => {
-          const scrollElement = scrollArea.value;
-          const styles = scrollElement
-            ? getComputedStyle(scrollElement)
-            : undefined;
-          const horizontalPadding = styles
-            ? Number.parseFloat(styles.paddingLeft) +
-              Number.parseFloat(styles.paddingRight)
-            : 0;
-          const verticalPadding = styles
-            ? Number.parseFloat(styles.paddingTop) +
-              Number.parseFloat(styles.paddingBottom)
-            : 0;
-          const viewportWidth = Math.max(
-            1,
-            (scrollElement?.clientWidth || 800) - horizontalPadding,
-          );
-          const viewportHeight = Math.max(
-            1,
-            (scrollElement?.clientHeight || 800) - verticalPadding,
-          );
-          const base = pdfPage.getViewport({ scale: 1 });
-          const widthScale = viewportWidth / base.width;
-          const heightScale = viewportHeight / base.height;
-          const next =
-            mode === "width"
-              ? widthScale
-              : mode === "height"
-                ? heightScale
-                : Math.min(widthScale, heightScale);
-          void zoomTo(next);
-        },
-      );
+    const fit = $((mode: PdfFitMode, epoch: number) => {
+      void pdf.value
+        ?.getPage(page)
+        .then(
+          (pdfPage: {
+            getViewport: (options: { scale: number }) => {
+              width: number;
+              height: number;
+            };
+          }) => {
+            const scrollElement = scrollArea.value;
+            const styles = scrollElement
+              ? getComputedStyle(scrollElement)
+              : undefined;
+            const horizontalPadding = styles
+              ? Number.parseFloat(styles.paddingLeft) +
+                Number.parseFloat(styles.paddingRight)
+              : 0;
+            const verticalPadding = styles
+              ? Number.parseFloat(styles.paddingTop) +
+                Number.parseFloat(styles.paddingBottom)
+              : 0;
+            const viewportWidth = Math.max(
+              1,
+              (scrollElement?.clientWidth || 800) - horizontalPadding,
+            );
+            const viewportHeight = Math.max(
+              1,
+              (scrollElement?.clientHeight || 800) - verticalPadding,
+            );
+            const base = pdfPage.getViewport({ scale: 1 });
+            const widthScale = viewportWidth / base.width;
+            const heightScale = viewportHeight / base.height;
+            const next =
+              mode === "width"
+                ? widthScale
+                : mode === "height"
+                  ? heightScale
+                  : Math.min(widthScale, heightScale);
+            if (fitEpoch.value !== epoch) return;
+            void zoomTo(next, true);
+          },
+        )
+        .catch(() => undefined);
+    });
+    const runFit = $((mode: PdfFitMode) => {
+      if (onFit$) {
+        void onFit$(mode);
+        return;
+      }
+      const epoch = ++fitEpoch.value;
+      void fit(mode, epoch);
     });
     // eslint-disable-next-line qwik/no-use-visible-task
     useVisibleTask$(({ track, cleanup }) => {
       const requestedVersion = track(() => fitVersion);
       const requestedMode = track(() => fitMode);
+      // Recompute for the newly visible page as page dimensions may differ
+      // within the same document (for example, portrait and landscape pages).
+      track(() => page);
       if (
         !requestedVersion ||
         !requestedMode ||
@@ -538,8 +569,47 @@ export const PdfReader = component$<Props>(
         !pages.value
       )
         return;
-      const frame = requestAnimationFrame(() => void fit(requestedMode));
-      cleanup(() => cancelAnimationFrame(frame));
+      const epoch = ++fitEpoch.value;
+      const frame = requestAnimationFrame(() => void fit(requestedMode, epoch));
+      cleanup(() => {
+        // Invalidate a fit promise that may still be waiting on PDF.js while
+        // this reader is being unmounted or the request is superseded.
+        fitEpoch.value++;
+        cancelAnimationFrame(frame);
+      });
+    });
+    // Keep an explicitly selected fit mode useful when the viewport or the
+    // split-pane layout changes after the reader has mounted.
+    // eslint-disable-next-line qwik/no-use-visible-task
+    useVisibleTask$(({ track, cleanup }) => {
+      const requestedMode = track(() => fitMode);
+      track(() => active);
+      track(() => pdf.value);
+      track(() => pages.value);
+      const target = scrollArea.value;
+      if (
+        !requestedMode ||
+        !active ||
+        !pdf.value ||
+        !pages.value ||
+        !target ||
+        typeof ResizeObserver === "undefined"
+      )
+        return;
+      let frame = 0;
+      const observer = new ResizeObserver(() => {
+        cancelAnimationFrame(frame);
+        frame = requestAnimationFrame(() => {
+          const epoch = ++fitEpoch.value;
+          void fit(requestedMode, epoch);
+        });
+      });
+      observer.observe(target);
+      cleanup(() => {
+        observer.disconnect();
+        cancelAnimationFrame(frame);
+        fitEpoch.value++;
+      });
     });
     const download = $(() => {
       void Promise.all([getPaper(documentId), getPaperFile(documentId)]).then(
@@ -550,7 +620,9 @@ export const PdfReader = component$<Props>(
           anchor.href = url;
           anchor.download = safeDownloadName(
             paper?.fileName ||
-              (file.file instanceof File ? file.file.name : `${documentId}.pdf`),
+              (file.file instanceof File
+                ? file.file.name
+                : `${documentId}.pdf`),
             `${documentId}.pdf`,
           );
           anchor.click();
@@ -611,7 +683,8 @@ export const PdfReader = component$<Props>(
       const clipboardText = selectedClipboardText.value || selectedText.value;
       try {
         try {
-          if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable");
+          if (!navigator.clipboard?.writeText)
+            throw new Error("Clipboard API unavailable");
           await navigator.clipboard.writeText(clipboardText);
         } catch {
           const textarea = document.createElement("textarea");
@@ -627,7 +700,11 @@ export const PdfReader = component$<Props>(
             textarea.remove();
           }
         }
-        selectionStatus.value = localize(locale.value, "コピーしました", "Copied");
+        selectionStatus.value = localize(
+          locale.value,
+          "コピーしました",
+          "Copied",
+        );
         selectionStatusError.value = false;
       } catch {
         selectionStatus.value = localize(
@@ -740,14 +817,14 @@ export const PdfReader = component$<Props>(
               <button
                 type="button"
                 class="button subtle"
-                onClick$={() => fit("width")}
+                onClick$={() => runFit("width")}
               >
                 {localize(locale.value, "幅に合わせる", "Fit width")}
               </button>
               <button
                 type="button"
                 class="button subtle"
-                onClick$={() => fit("height")}
+                onClick$={() => runFit("height")}
               >
                 {localize(locale.value, "高さに合わせる", "Fit height")}
               </button>
@@ -819,105 +896,124 @@ export const PdfReader = component$<Props>(
             </div>
           </aside>
           <div class="relative flex min-h-0 min-w-0 flex-col">
-            <div class={`${minimal ? "absolute inset-x-0 top-0 z-10 shadow-md" : ""} flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white px-3 py-2`}>
+            <div
+              class={`${minimal ? "absolute inset-x-0 top-0 z-10 shadow-md" : ""} flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white px-3 py-2`}
+            >
               <button
                 type="button"
                 class="button subtle py-1 text-xs"
                 aria-expanded={showSearch.value}
                 onClick$={() => {
                   showSearch.value = !showSearch.value;
-                  if (showSearch.value) requestAnimationFrame(() => searchInput.value?.focus());
+                  if (showSearch.value)
+                    requestAnimationFrame(() => searchInput.value?.focus());
                 }}
               >
                 <Icon name="Search" size={15} />
-                {showSearch.value ? localize(locale.value, "検索を閉じる", "Hide search") : localize(locale.value, "PDF内検索", "Search PDF")}
+                {showSearch.value
+                  ? localize(locale.value, "検索を閉じる", "Hide search")
+                  : localize(locale.value, "PDF内検索", "Search PDF")}
               </button>
               {showSearch.value && (
                 <>
-              <label class="relative min-w-48 flex-1">
-                <span class="sr-only">
-                  {localize(locale.value, "PDF内検索", "Search PDF")}
-                </span>
-                <Icon
-                  name="Search"
-                  size={15}
-                  class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-slate-400"
-                />
-                <input
-                  ref={searchInput}
-                  class="pdf-search-input w-full py-1 pl-8 text-xs"
-                  placeholder={localize(
-                    locale.value,
-                    "PDF内検索",
-                    "Search PDF",
+                  <label class="relative min-w-48 flex-1">
+                    <span class="sr-only">
+                      {localize(locale.value, "PDF内検索", "Search PDF")}
+                    </span>
+                    <Icon
+                      name="Search"
+                      size={15}
+                      class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-slate-400"
+                    />
+                    <input
+                      ref={searchInput}
+                      class="pdf-search-input w-full py-1 pl-8 text-xs"
+                      placeholder={localize(
+                        locale.value,
+                        "PDF内検索",
+                        "Search PDF",
+                      )}
+                      value={search.value}
+                      aria-invalid={searchError.value ? "true" : undefined}
+                      onInput$={(_, el) => {
+                        search.value = el.value;
+                        searchError.value = "";
+                        searchMatches.value = [];
+                        searchMatchIndex.value = -1;
+                      }}
+                      onKeyDown$={(event) => {
+                        if (event.key === "Enter") void runSearch();
+                      }}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    class="button subtle py-1 text-xs"
+                    onClick$={runSearch}
+                  >
+                    {localize(locale.value, "検索", "Search")}
+                  </button>
+                  {searchMatches.value.length > 0 && (
+                    <div class="flex items-center gap-1 text-xs text-slate-600">
+                      <button
+                        type="button"
+                        class="button subtle py-1"
+                        aria-label={localize(
+                          locale.value,
+                          "前の検索結果",
+                          "Previous match",
+                        )}
+                        onClick$={() => moveSearch(-1)}
+                      >
+                        <Icon name="ChevronLeft" size={15} />
+                      </button>
+                      <span class="tabular-nums">
+                        {searchMatchIndex.value + 1}/
+                        {searchMatches.value.length}
+                      </span>
+                      <button
+                        type="button"
+                        class="button subtle py-1"
+                        aria-label={localize(
+                          locale.value,
+                          "次の検索結果",
+                          "Next match",
+                        )}
+                        onClick$={() => moveSearch(1)}
+                      >
+                        <Icon name="ChevronRight" size={15} />
+                      </button>
+                    </div>
                   )}
-                  value={search.value}
-                  aria-invalid={searchError.value ? "true" : undefined}
-                  onInput$={(_, el) => {
-                    search.value = el.value;
-                    searchError.value = "";
-                    searchMatches.value = [];
-                    searchMatchIndex.value = -1;
-                  }}
-                  onKeyDown$={(event) => {
-                    if (event.key === "Enter") void runSearch();
-                  }}
-                />
-              </label>
-              <button
-                type="button"
-                class="button subtle py-1 text-xs"
-                onClick$={runSearch}
-              >
-                {localize(locale.value, "検索", "Search")}
-              </button>
-              {searchMatches.value.length > 0 && (
-                <div class="flex items-center gap-1 text-xs text-slate-600">
-                  <button
-                    type="button"
-                    class="button subtle py-1"
-                    aria-label={localize(
-                      locale.value,
-                      "前の検索結果",
-                      "Previous match",
-                    )}
-                    onClick$={() => moveSearch(-1)}
-                  >
-                    <Icon name="ChevronLeft" size={15} />
-                  </button>
-                  <span class="tabular-nums">
-                    {searchMatchIndex.value + 1}/{searchMatches.value.length}
-                  </span>
-                  <button
-                    type="button"
-                    class="button subtle py-1"
-                    aria-label={localize(
-                      locale.value,
-                      "次の検索結果",
-                      "Next match",
-                    )}
-                    onClick$={() => moveSearch(1)}
-                  >
-                    <Icon name="ChevronRight" size={15} />
-                  </button>
-                </div>
-              )}
-              {searchError.value && (
-                <span role="alert" class="text-xs text-red-700">
-                  {searchError.value}
-                </span>
-              )}
+                  {searchError.value && (
+                    <span role="alert" class="text-xs text-red-700">
+                      {searchError.value}
+                    </span>
+                  )}
                 </>
               )}
-              {!Object.values(textByPage.value).some((text) => text.trim()) && !loading.value && (
-                <span role="status" class="text-xs text-amber-700">
-                  {localize(locale.value, "本文テキストがないPDFです。検索・翻訳・選択は利用できません。", "This PDF has no extractable text. Search, translation, and selection are unavailable.")}
-                </span>
-              )}
+              {!Object.values(textByPage.value).some((text) => text.trim()) &&
+                !loading.value && (
+                  <span role="status" class="text-xs text-amber-700">
+                    {localize(
+                      locale.value,
+                      "本文テキストがないPDFです。検索・翻訳・選択は利用できません。",
+                      "This PDF has no extractable text. Search, translation, and selection are unavailable.",
+                    )}
+                  </span>
+                )}
               {textByPage.value[page]?.trim() && (
                 <details class="ml-auto max-w-full text-xs text-slate-600">
-                  <summary class="cursor-pointer px-2 py-1 font-semibold">{localize(locale.value, "このページのテキスト", "Page text")}</summary>
-                  <p class="max-h-40 max-w-xl overflow-auto whitespace-pre-wrap border border-slate-200 bg-slate-50 p-2">{textByPage.value[page]}</p>
+                  <summary class="cursor-pointer px-2 py-1 font-semibold">
+                    {localize(
+                      locale.value,
+                      "このページのテキスト",
+                      "Page text",
+                    )}
+                  </summary>
+                  <p class="max-h-40 max-w-xl overflow-auto whitespace-pre-wrap border border-slate-200 bg-slate-50 p-2">
+                    {textByPage.value[page]}
+                  </p>
                 </details>
               )}
               {!minimal && (
@@ -1053,7 +1149,11 @@ export const PdfReader = component$<Props>(
                   </span>
                   {selectionTruncated.value && (
                     <span class="w-full text-amber-800">
-                      {localize(locale.value, "選択範囲が4,000文字を超えたため、翻訳・注釈は先頭のみが対象です。コピーは全文を対象にします。", "The selection exceeds 4,000 characters; translation and annotations use only the beginning, while copy includes the full selection.")}
+                      {localize(
+                        locale.value,
+                        "選択範囲が4,000文字を超えたため、翻訳・注釈は先頭のみが対象です。コピーは全文を対象にします。",
+                        "The selection exceeds 4,000 characters; translation and annotations use only the beginning, while copy includes the full selection.",
+                      )}
                     </span>
                   )}
                   <button
@@ -1095,7 +1195,11 @@ export const PdfReader = component$<Props>(
                   {selectionStatus.value && (
                     <span
                       role={selectionStatusError.value ? "alert" : "status"}
-                      class={selectionStatusError.value ? "text-red-700" : "text-emerald-700"}
+                      class={
+                        selectionStatusError.value
+                          ? "text-red-700"
+                          : "text-emerald-700"
+                      }
                     >
                       {selectionStatus.value}
                     </span>
